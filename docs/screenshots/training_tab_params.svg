@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="400">
+  <rect width="100%" height="100%" fill="#fafafa"/>
+  <text x="20" y="36" font-size="20" fill="#111827">Training Tab — 參數與模型管理</text>
+  <rect x="20" y="60" width="400" height="300" fill="#ffffff" stroke="#e5e7eb"/>
+  <rect x="440" y="60" width="420" height="300" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="40" y="100" font-size="14" fill="#374151">左側: 訓練參數 (Epochs, Batch Size, Augmentation)</text>
+  <text x="460" y="100" font-size="14" fill="#374151">右側: 訓練日誌與訓練曲線</text>
+</svg>

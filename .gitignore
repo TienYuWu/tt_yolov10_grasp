@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+Trash_bin
+runs/
+captures/
