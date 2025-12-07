@@ -82,7 +82,7 @@ class DetectionWorker(QThread):
 
             self.status_message.emit(f"Loading image: {self.image_path.name}")
 
-            # Load image (OpenCV returns BGR format)
+            # Load image (OpenCV always loads as BGR)
             bgr_image = cv2.imread(str(self.image_path))
             if bgr_image is None:
                 self.detection_failed.emit(f"Failed to load image: {self.image_path}")
@@ -348,7 +348,7 @@ class DetectionWorker(QThread):
             confidence = detection['confidence']
             det_id = detection['detection_id']
 
-            # Draw OBB box
+            # Draw OBB box (RGB format: Green)
             annotated = draw_obb_box(
                 annotated,
                 center=obb['center'],
@@ -356,7 +356,7 @@ class DetectionWorker(QThread):
                 height=obb['height'],
                 rotation_rad=obb['rotation_rad'],
                 corners=obb['corners'],
-                color=(0, 255, 0),
+                color=(0, 255, 0),  # RGB: Green
                 thickness=2
             )
 

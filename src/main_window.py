@@ -1,6 +1,8 @@
 """Main window - Tab container for Smart Label application."""
 
+import json
 from pathlib import Path
+from typing import Optional
 
 from PySide6.QtWidgets import QMainWindow, QTabWidget, QStatusBar
 from PySide6.QtCore import Signal
@@ -49,7 +51,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.training_tab, "🎯 訓練")
 
         # Detection Tab
-        model_path = str(Path(r"C:\Users\NCKU_CSIE_RL_TIEN\Desktop\Smart_Label_TT\best.pt"))
+        model_path = self._load_model_path(config)
         self.detection_tab = DetectionTab(config, model_path, self)
         self.tabs.addTab(self.detection_tab, "🔍 檢測")
 
@@ -62,6 +64,43 @@ class MainWindow(QMainWindow):
 
         # Align UI text to left for better readability
         self._align_ui_text_left()
+
+    def _load_model_path(self, config: AppConfig) -> str:
+        """Load model path from config file or use default.
+
+        Args:
+            config: Application configuration
+
+        Returns:
+            Model file path (str)
+        """
+        try:
+            # Try to load from config file
+            if hasattr(config, 'output_dir') and config.output_dir:
+                config_file = Path(config.output_dir) / "model_config.json"
+            else:
+                config_file = Path.cwd() / "model_config.json"
+
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config_data = json.load(f)
+                    model_path = config_data.get('model_path')
+                    if model_path and Path(model_path).exists():
+                        print(f"Loaded model path from config: {model_path}")
+                        return str(model_path)
+        except Exception as e:
+            print(f"Failed to load model config: {e}")
+
+        # Default fallback: look for best.pt in project directory
+        default_path = Path.cwd() / "best.pt"
+        if default_path.exists():
+            print(f"Using default model path: {default_path}")
+            return str(default_path)
+
+        # Final fallback: original hardcoded path
+        fallback_path = r"C:\Users\NCKU_CSIE_RL_TIEN\Desktop\tt_yolov10_grasp\best.pt"
+        print(f"Using fallback model path: {fallback_path}")
+        return fallback_path
 
     def update_status(self, message: str):
         """Update status bar message.

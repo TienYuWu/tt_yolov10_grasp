@@ -147,6 +147,10 @@ class DetectionTab(QWidget):
         pose_group = self._create_pose_mode_group()
         layout.addWidget(pose_group)
 
+        # Model settings group
+        model_group = self._create_model_settings_group()
+        layout.addWidget(model_group)
+
         # Camera intrinsics group
         intrinsics_group = self._create_intrinsics_group()
         layout.addWidget(intrinsics_group)
@@ -250,6 +254,30 @@ class DetectionTab(QWidget):
         group.setLayout(layout)
         return group
 
+    def _create_model_settings_group(self) -> QGroupBox:
+        """Create model path settings group.
+
+        Returns:
+            Model settings group box
+        """
+        group = QGroupBox("🤖 模型設定")
+        layout = QVBoxLayout()
+
+        # Settings button
+        model_btn = QPushButton("模型路徑設定")
+        model_btn.clicked.connect(self._on_model_settings)
+        model_btn.setToolTip("設定 YOLO OBB 模型檔案路徑")
+        layout.addWidget(model_btn)
+
+        # Status label
+        self.model_status_label = QLabel("模型: 未載入")
+        self.model_status_label.setWordWrap(True)
+        self.model_status_label.setStyleSheet("QLabel { font-size: 10px; color: gray; }")
+        layout.addWidget(self.model_status_label)
+
+        group.setLayout(layout)
+        return group
+
     def _create_intrinsics_group(self) -> QGroupBox:
         """Create camera intrinsics settings group.
 
@@ -317,7 +345,15 @@ class DetectionTab(QWidget):
         group = QGroupBox("💾 儲存選項")
         layout = QVBoxLayout()
 
-        self.save_json_btn = QPushButton("儲存 JSON")
+        # Auto-save checkbox
+        self.auto_save_json_checkbox = QCheckBox("自動儲存 JSON (用於機器手臂)")
+        self.auto_save_json_checkbox.setChecked(True)  # Default: enabled
+        layout.addWidget(self.auto_save_json_checkbox)
+
+        # Add separator
+        layout.addSpacing(10)
+
+        self.save_json_btn = QPushButton("手動儲存 JSON")
         self.save_json_btn.clicked.connect(self._on_save_json)
         self.save_json_btn.setEnabled(False)
         layout.addWidget(self.save_json_btn)
@@ -429,6 +465,66 @@ class DetectionTab(QWidget):
         except Exception as e:
             print(f"Failed to save intrinsics config: {e}")
 
+    def _load_model_path_from_config(self) -> Optional[str]:
+        """Load model path from config file.
+
+        Returns:
+            Model path string, or None if not found
+        """
+        try:
+            import json
+            from pathlib import Path
+
+            # Get config directory
+            if hasattr(self.config, 'output_dir') and self.config.output_dir:
+                config_file = Path(self.config.output_dir) / "model_config.json"
+            else:
+                # Fallback to current directory
+                config_file = Path.cwd() / "model_config.json"
+
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config_data = json.load(f)
+                    model_path = config_data.get('model_path')
+                    if model_path and Path(model_path).exists():
+                        return model_path
+        except Exception as e:
+            print(f"Failed to load model config: {e}")
+
+        return None
+
+    def _save_model_path_to_config(self, model_path: str):
+        """Save model path to config file.
+
+        Args:
+            model_path: Model file path to save
+        """
+        try:
+            import json
+            from pathlib import Path
+
+            # Get config directory
+            if hasattr(self.config, 'output_dir') and self.config.output_dir:
+                config_file = Path(self.config.output_dir) / "model_config.json"
+            else:
+                # Fallback to current directory
+                config_file = Path.cwd() / "model_config.json"
+
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+
+            config_data = {
+                'model_path': str(model_path),
+                'last_updated': datetime.now().isoformat()
+            }
+
+            with open(config_file, 'w') as f:
+                json.dump(config_data, f, indent=2)
+
+            print(f"Saved model path to config: {model_path}")
+
+        except Exception as e:
+            print(f"Failed to save model config: {e}")
+
     def _initialize_service(self):
         """Initialize detection service."""
         try:
@@ -445,6 +541,15 @@ class DetectionTab(QWidget):
             self.status_label.setText("✅ 檢測服務已就緒")
             self.status_label.setStyleSheet("QLabel { color: green; }")
 
+            # Update model status label
+            if self.model_path and Path(self.model_path).exists():
+                model_name = Path(self.model_path).name
+                self.model_status_label.setText(f"模型: {model_name}")
+                self.model_status_label.setStyleSheet("QLabel { font-size: 10px; color: green; }")
+            else:
+                self.model_status_label.setText("模型: 未設定")
+                self.model_status_label.setStyleSheet("QLabel { font-size: 10px; color: orange; }")
+
         except Exception as e:
             QMessageBox.critical(
                 self,
@@ -453,6 +558,8 @@ class DetectionTab(QWidget):
             )
             self.status_label.setText(f"❌ 初始化失敗: {e}")
             self.status_label.setStyleSheet("QLabel { color: red; }")
+            self.model_status_label.setText("模型: 載入失敗")
+            self.model_status_label.setStyleSheet("QLabel { font-size: 10px; color: red; }")
 
     @Slot()
     def _on_browse_image(self):
@@ -578,6 +685,65 @@ class DetectionTab(QWidget):
             self.status_label.setText(f"姿態模式: {new_mode}")
 
     @Slot()
+    def _on_model_settings(self):
+        """Open model path selection dialog and reload model."""
+        # Browse for model file
+        model_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "選擇 YOLO OBB 模型檔案",
+            str(Path(self.model_path).parent) if self.model_path else "",
+            "PyTorch Models (*.pt *.pth);;All Files (*.*)"
+        )
+
+        if not model_path:
+            return
+
+        # Validate file exists
+        if not Path(model_path).exists():
+            QMessageBox.warning(
+                self,
+                "檔案不存在",
+                f"選擇的模型檔案不存在:\n{model_path}"
+            )
+            return
+
+        # Check if detection is running
+        if self.is_camera_active or (self.detection_worker and self.detection_worker.isRunning()):
+            QMessageBox.warning(
+                self,
+                "無法切換模型",
+                "請先停止檢測再切換模型"
+            )
+            return
+
+        # Update model path
+        self.model_path = model_path
+        self._save_model_path_to_config(model_path)
+
+        # Reinitialize detection service with new model
+        try:
+            self._initialize_service()
+
+            # Update status label
+            model_name = Path(model_path).name
+            self.model_status_label.setText(f"模型: {model_name}")
+            self.model_status_label.setStyleSheet("QLabel { font-size: 10px; color: green; }")
+
+            QMessageBox.information(
+                self,
+                "模型已載入",
+                f"成功載入模型:\n{model_name}"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "載入失敗",
+                f"無法載入模型:\n{e}"
+            )
+            self.model_status_label.setText("模型: 載入失敗")
+            self.model_status_label.setStyleSheet("QLabel { font-size: 10px; color: red; }")
+
     def _on_intrinsics_settings(self):
         """Open intrinsics settings dialog."""
         from .intrinsics_dialog import IntrinsicsDialog
@@ -646,9 +812,48 @@ class DetectionTab(QWidget):
                 except Exception as e:
                     print(f"Warning: Error closing 3D visualizer: {e}")
 
+    def _auto_save_json(self, result: Dict):
+        """Auto-save detection results as JSON to output directory.
+
+        Args:
+            result: Detection result dictionary
+        """
+        try:
+            # Check if output_dir is configured
+            if not hasattr(self.config, 'output_dir') or self.config.output_dir is None:
+                # Use current directory as fallback
+                output_dir = Path.cwd() / "detections" / "json"
+            else:
+                output_dir = Path(self.config.output_dir) / "detections" / "json"
+
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            filename = f"detection_{timestamp}.json"
+
+            # Create output directory
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Full save path
+            save_path = output_dir / filename
+
+            # Save JSON
+            with open(save_path, 'w', encoding='utf-8') as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
+
+            # Update status
+            self.status_label.setText(f"✅ 自動儲存: {filename}")
+            print(f"Auto-saved JSON to: {save_path}")
+
+        except Exception as e:
+            error_msg = f"自動儲存 JSON 失敗: {e}"
+            self.status_label.setText(f"❌ {error_msg}")
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+
     @Slot()
     def _on_save_json(self):
-        """Save detection results as JSON."""
+        """Save detection results as JSON (manual save with file dialog)."""
         if not self.current_result:
             return
 
@@ -884,6 +1089,10 @@ class DetectionTab(QWidget):
         self.save_json_btn.setEnabled(has_detections)
         self.save_txt_btn.setEnabled(has_detections)
         self.save_image_btn.setEnabled(True)  # Always enable for annotated image
+
+        # Auto-save JSON if enabled and has detections
+        if self.auto_save_json_checkbox.isChecked() and has_detections:
+            self._auto_save_json(result)
 
         # Re-enable detect button for image mode
         if not self.is_camera_active:
