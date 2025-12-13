@@ -14,10 +14,11 @@ from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QGroupBox, QFileDialog, QMessageBox, QRadioButton,
-    QButtonGroup, QCheckBox, QSplitter, QLineEdit
+    QButtonGroup, QCheckBox, QSplitter, QLineEdit, QFrame
 )
 
 from .detection_canvas import DetectionCanvas
+from .widgets import OutputConsole
 from ..config import AppConfig
 from ..services.detection_service import DetectionService
 from ..workers.detection_worker import DetectionWorker
@@ -60,8 +61,22 @@ class DetectionTab(QWidget):
         self._initialize_service()
 
     def _build_ui(self):
-        """Build the detection tab UI."""
-        main_layout = QHBoxLayout()
+        """Build the detection tab UI with vertical split layout.
+
+        Layout structure:
+        - Vertical Splitter (outer):
+          - Top (70%): Horizontal Splitter (Canvas + Controls)
+          - Bottom (30%): Output Console
+        """
+        main_layout = QVBoxLayout()
+
+        # ========== OUTER VERTICAL SPLITTER ==========
+        vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # ========== TOP SECTION: Canvas + Control Panel ==========
+        top_widget = QWidget()
+        top_layout = QHBoxLayout()
+        top_layout.setContentsMargins(0, 0, 0, 0)
 
         # Left panel: Canvas (70%)
         left_panel = self._create_canvas_panel()
@@ -69,14 +84,31 @@ class DetectionTab(QWidget):
         # Right panel: Controls (30%)
         right_panel = self._create_control_panel()
 
-        # Splitter
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 7)  # 70% for canvas
-        splitter.setStretchFactor(1, 3)  # 30% for controls
+        # Inner horizontal splitter
+        horizontal_splitter = QSplitter(Qt.Orientation.Horizontal)
+        horizontal_splitter.addWidget(left_panel)
+        horizontal_splitter.addWidget(right_panel)
+        horizontal_splitter.setStretchFactor(0, 7)  # 70% for canvas
+        horizontal_splitter.setStretchFactor(1, 3)  # 30% for controls
 
-        main_layout.addWidget(splitter)
+        top_layout.addWidget(horizontal_splitter)
+        top_widget.setLayout(top_layout)
+
+        # ========== BOTTOM SECTION: Output Console ==========
+        self.output_console = self._create_output_console()
+
+        # Add both sections to vertical splitter
+        vertical_splitter.addWidget(top_widget)
+        vertical_splitter.addWidget(self.output_console)
+
+        # Set vertical splitter proportions (70% top, 30% bottom)
+        vertical_splitter.setStretchFactor(0, 7)
+        vertical_splitter.setStretchFactor(1, 3)
+
+        # Prevent full collapse of either section
+        vertical_splitter.setChildrenCollapsible(False)
+
+        main_layout.addWidget(vertical_splitter)
         self.setLayout(main_layout)
 
     def _create_canvas_panel(self) -> QWidget:
@@ -131,7 +163,9 @@ class DetectionTab(QWidget):
         return toolbar
 
     def _create_control_panel(self) -> QWidget:
-        """Create control panel with all settings.
+        """Create control panel with reorganized workflow.
+
+        Workflow: Setup → Action → Visualization → Storage
 
         Returns:
             Control panel widget
@@ -139,35 +173,67 @@ class DetectionTab(QWidget):
         panel = QWidget()
         layout = QVBoxLayout()
 
+        # ========== GROUP 1: SETUP (設定區) ==========
+        setup_label = QLabel("⚙️ SETUP")
+        setup_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #0078d4;")
+        layout.addWidget(setup_label)
+
         # Input source group
         input_group = self._create_input_source_group()
         layout.addWidget(input_group)
-
-        # Pose mode group
-        pose_group = self._create_pose_mode_group()
-        layout.addWidget(pose_group)
 
         # Model settings group
         model_group = self._create_model_settings_group()
         layout.addWidget(model_group)
 
+        # Pose mode group
+        pose_group = self._create_pose_mode_group()
+        layout.addWidget(pose_group)
+
         # Camera intrinsics group
         intrinsics_group = self._create_intrinsics_group()
         layout.addWidget(intrinsics_group)
 
-        # Visualization options group
+        # Separator
+        layout.addWidget(self._create_separator())
+
+        # ========== GROUP 2: ACTION (動作區，強調) ==========
+        action_label = QLabel("▶️ ACTION")
+        action_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #4ec9b0;")
+        layout.addWidget(action_label)
+
+        action_button_widget = self._create_action_button()
+        layout.addWidget(action_button_widget)
+
+        # Separator
+        layout.addWidget(self._create_separator())
+
+        # ========== GROUP 3: VISUALIZATION (視覺化) ==========
+        viz_label = QLabel("👁️ VISUALIZATION")
+        viz_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #ce9178;")
+        layout.addWidget(viz_label)
+
         vis_group = self._create_visualization_group()
         layout.addWidget(vis_group)
 
-        # Save options group
+        # Separator
+        layout.addWidget(self._create_separator())
+
+        # ========== GROUP 4: STORAGE (儲存) ==========
+        storage_label = QLabel("💾 STORAGE")
+        storage_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #dcdcaa;")
+        layout.addWidget(storage_label)
+
         save_group = self._create_save_group()
         layout.addWidget(save_group)
 
-        # Status group
+        # Flexible space to push content to top
+        layout.addStretch()
+
+        # ========== STATUS INDICATOR (底部) ==========
+        # 保留精簡的狀態指示器在控制面板底部
         status_group = self._create_status_group()
         layout.addWidget(status_group)
-
-        layout.addStretch()
 
         panel.setLayout(layout)
         return panel
@@ -219,12 +285,6 @@ class DetectionTab(QWidget):
         camera_row.addWidget(self.stop_camera_btn)
 
         layout.addLayout(camera_row)
-
-        # Detect button
-        self.detect_btn = QPushButton("🎯 執行檢測")
-        self.detect_btn.clicked.connect(self._on_detect)
-        self.detect_btn.setStyleSheet("QPushButton { font-weight: bold; padding: 8px; }")
-        layout.addWidget(self.detect_btn)
 
         group.setLayout(layout)
         return group
@@ -399,6 +459,105 @@ class DetectionTab(QWidget):
 
         group.setLayout(layout)
         return group
+
+    def _create_output_console(self) -> OutputConsole:
+        """Create output console for logging detection results.
+
+        Returns:
+            OutputConsole widget
+        """
+        console = OutputConsole()
+        console.setMinimumHeight(150)
+        console.log_info("Detection Tab initialized. Ready to start.")
+        return console
+
+    def _create_separator(self) -> QWidget:
+        """Create a horizontal separator line.
+
+        Returns:
+            Separator widget
+        """
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet("background-color: #3e3e42;")
+        return line
+
+    def _create_action_button(self) -> QWidget:
+        """Create emphasized action button section.
+
+        Returns:
+            Action button container widget
+        """
+        container = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        # Main execution button
+        self.run_detection_btn = QPushButton("🚀 開始檢測")
+        self.run_detection_btn.setMinimumHeight(50)
+        self.run_detection_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0078d4;
+                color: white;
+                border: 2px solid #005a9e;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: bold;
+                padding: 10px;
+            }
+            QPushButton:hover {
+                background-color: #1084d8;
+                border-color: #0078d4;
+            }
+            QPushButton:pressed {
+                background-color: #005a9e;
+            }
+            QPushButton:disabled {
+                background-color: #3e3e42;
+                color: #808080;
+                border-color: #2d2d30;
+            }
+        """)
+        self.run_detection_btn.clicked.connect(self._on_detect)
+        layout.addWidget(self.run_detection_btn)
+
+        # Optional: Stop button
+        self.stop_detection_btn = QPushButton("⏹ 停止")
+        self.stop_detection_btn.setMinimumHeight(35)
+        self.stop_detection_btn.setEnabled(False)
+        self.stop_detection_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4d4d4d;
+                color: #d4d4d4;
+                border: 1px solid #3e3e42;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #5a5a5a;
+                border-color: #505050;
+            }
+            QPushButton:pressed {
+                background-color: #3e3e42;
+            }
+            QPushButton:disabled {
+                background-color: #3e3e42;
+                color: #808080;
+                border-color: #2d2d30;
+            }
+        """)
+        self.stop_detection_btn.clicked.connect(self._on_stop_detection)
+        layout.addWidget(self.stop_detection_btn)
+
+        container.setLayout(layout)
+        return container
+
+    def _on_stop_detection(self):
+        """Handle stop detection button click."""
+        if self.detection_worker and self.detection_worker.isRunning():
+            self.detection_worker.stop()
+            self.output_console.log_warning("Detection stopped by user.")
 
     def _connect_signals(self):
         """Connect UI signals to slots."""
@@ -575,6 +734,9 @@ class DetectionTab(QWidget):
             self.current_image_path = Path(file_path)
             self.image_path_edit.setText(str(self.current_image_path))
 
+            # Log image selection
+            self.output_console.log_info(f"Image loaded: {self.current_image_path.name}")
+
             # Load and display image
             self._load_and_display_image(self.current_image_path)
 
@@ -582,6 +744,9 @@ class DetectionTab(QWidget):
     def _on_start_camera(self):
         """Handle start camera button click."""
         try:
+            # Log camera connection attempt
+            self.output_console.log_info("Connecting to RealSense camera...")
+
             # Import RealSense service
             from ..services.realsense_service import RealSenseService
 
@@ -598,10 +763,16 @@ class DetectionTab(QWidget):
             self.browse_btn.setEnabled(False)
             self.camera_mode_radio.setChecked(True)
 
+            # Log successful connection
+            self.output_console.log_result("RealSense camera connected successfully.")
+
             # Start detection worker in camera mode
             self._start_camera_detection()
 
         except Exception as e:
+            # Log error
+            self.output_console.log_error(f"Failed to connect camera: {str(e)}")
+
             QMessageBox.critical(
                 self,
                 "相機啟動失敗",
@@ -614,6 +785,9 @@ class DetectionTab(QWidget):
     def _on_stop_camera(self):
         """Handle stop camera button click."""
         try:
+            # Log camera stop
+            self.output_console.log_info("Stopping camera...")
+
             # Stop worker
             if self.detection_worker:
                 self.detection_worker.stop()
@@ -634,7 +808,13 @@ class DetectionTab(QWidget):
             self.status_label.setText("相機已停止")
             self.fps_label.setText("FPS: --")
 
+            # Log successful stop
+            self.output_console.log_result("Camera stopped.")
+
         except Exception as e:
+            # Log error
+            self.output_console.log_error(f"Error stopping camera: {str(e)}")
+
             QMessageBox.warning(
                 self,
                 "停止相機",
@@ -646,18 +826,18 @@ class DetectionTab(QWidget):
         """Handle detect button click."""
         if self.camera_mode_radio.isChecked():
             # Camera mode - start continuous detection
+            self.output_console.log_info("Starting camera detection...")
             if not self.is_camera_active:
                 self._on_start_camera()
         else:
             # Image mode - single detection
             if not self.current_image_path:
-                QMessageBox.warning(
-                    self,
-                    "無圖片",
-                    "請先選擇要檢測的圖片"
-                )
+                error_msg = "請先選擇要檢測的圖片"
+                self.output_console.log_error(error_msg)
+                QMessageBox.warning(self, "無圖片", error_msg)
                 return
 
+            self.output_console.log_info(f"Starting detection for image: {self.current_image_path.name}")
             self._detect_static_image()
 
     @Slot(int)
@@ -842,11 +1022,17 @@ class DetectionTab(QWidget):
 
             # Update status
             self.status_label.setText(f"✅ 自動儲存: {filename}")
+
+            # Log to console
+            self.output_console.log_result(f"Auto-saved JSON: {filename}")
             print(f"Auto-saved JSON to: {save_path}")
 
         except Exception as e:
             error_msg = f"自動儲存 JSON 失敗: {e}"
             self.status_label.setText(f"❌ {error_msg}")
+
+            # Log error to console
+            self.output_console.log_error(error_msg)
             print(error_msg)
             import traceback
             traceback.print_exc()
@@ -1009,7 +1195,7 @@ class DetectionTab(QWidget):
     def _detect_static_image(self):
         """Run detection on current static image."""
         try:
-            self.detect_btn.setEnabled(False)
+            self.run_detection_btn.setEnabled(False)
             self.status_label.setText("正在檢測...")
 
             # Start worker
@@ -1030,7 +1216,7 @@ class DetectionTab(QWidget):
             self.detection_worker.start()
 
         except Exception as e:
-            self.detect_btn.setEnabled(True)
+            self.run_detection_btn.setEnabled(True)
             QMessageBox.critical(
                 self,
                 "檢測失敗",
@@ -1084,6 +1270,18 @@ class DetectionTab(QWidget):
         count = result['metadata']['detection_count']
         self.count_label.setText(f"檢測數: {count}")
 
+        # Log detection completion
+        self.output_console.log_result(f"Detection completed. Found {count} object(s).")
+
+        # Log individual detections
+        if count > 0 and 'detections' in result:
+            for idx, det in enumerate(result['detections'], 1):
+                class_name = det.get('class_name', 'Unknown')
+                confidence = det.get('confidence', 0.0)
+                self.output_console.log_result(
+                    f"  [{idx}] {class_name} (Confidence: {confidence:.2%})"
+                )
+
         # Enable save buttons if we have detections
         has_detections = count > 0
         self.save_json_btn.setEnabled(has_detections)
@@ -1096,7 +1294,7 @@ class DetectionTab(QWidget):
 
         # Re-enable detect button for image mode
         if not self.is_camera_active:
-            self.detect_btn.setEnabled(True)
+            self.run_detection_btn.setEnabled(True)
 
     @Slot(float, float)
     def _on_performance_updated(self, fps: float, processing_time_ms: float):
@@ -1119,7 +1317,10 @@ class DetectionTab(QWidget):
         """
         self.status_label.setText(f"❌ 檢測失敗: {error_msg}")
         self.status_label.setStyleSheet("QLabel { color: red; }")
-        self.detect_btn.setEnabled(True)
+        self.run_detection_btn.setEnabled(True)
+
+        # Log error to console
+        self.output_console.log_error(f"Detection failed: {error_msg}")
 
         QMessageBox.critical(
             self,
