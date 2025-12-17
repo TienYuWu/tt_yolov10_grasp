@@ -48,9 +48,6 @@ class DetectionWorker(QThread):
             custom_intrinsics: Custom camera intrinsics for image mode (optional)
                 Dict with keys: width, height, fx, fy, cx, cy
             show_obb: Whether to draw OBB boxes on the annotated frame
-            show_axes: Whether to draw coordinate axes on the annotated frame
-            show_pose_text: Whether to draw pose text overlays (HUD) on the frame
-            show_detection_count: Whether to draw detection count HUD on the frame
         """
         super().__init__()
         self.detection_service = detection_service

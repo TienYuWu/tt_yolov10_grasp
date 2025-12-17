@@ -1,7 +1,7 @@
 # 使用者手冊
 
-**版本**: 2.0
-**更新日期**: 2025-12-07
+**版本**: 2.1
+**更新日期**: 2025-12-17
 
 
 ---
@@ -20,7 +20,7 @@
 
 ## 系統概述
 
-此專案是一套整合式的物體標註、訓練與檢測系統，專為旋轉邊界框 (Oriented Bounding Box, OBB) 標註設計。
+TT_Yolov10_PileGrasp 是一套整合式的物體標註、訓練與檢測系統，專為旋轉邊界框 (Oriented Bounding Box, OBB) 標註與 6D 姿態估計設計。
 
 ### 主要功能
 
@@ -65,25 +65,32 @@ tt_yolov10_grasp/
 
 ### 安裝步驟
 
-#### 使用 Conda（含 GPU 支援）
+#### 推薦：requirements.txt（Conda 環境）
 
 1. 在專案根目錄開啟 PowerShell，建立並啟用環境：
 
 ```powershell
-conda env create -f environment.yaml -n tt_yolov10_grasp
-conda activate tt_yolov10_grasp
+conda create -n tt_yolov10_pilegrasp python=3.10
+conda activate tt_yolov10_pilegrasp
 ```
 
-2. 若 `environment.yaml` 中仍有需要用 `pip` 安裝的套件，執行：
+2. 安裝基礎套件：
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-3. 若要使用 GPU（CUDA 12.8 / PyTorch +cu128），可手動安裝對應的 PyTorch wheel：
+3. 若要使用 GPU（CUDA 12.8 / PyTorch +cu128）：
 
 ```powershell
-pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.8.0+cu128 torchvision==0.23.0+cu128
+pip install torch==2.8.0+cu128 torchvision==0.23.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+```
+
+4. 安裝 YOLO 與 RealSense（可選）：
+
+```powershell
+pip install ultralytics
+pip install pyrealsense2
 ```
 
 
@@ -277,7 +284,6 @@ runs/obb/train/
 
 #### 輸入來源選擇區
 - **圖片模式**: 點 `瀏覽` 選擇單張圖片進行檢測
-- **資料夾模式**: 點 `瀏覽` 選擇資料夾進行批次檢測
 - **相機模式**: 點 `啟動相機` 使用 RealSense 進行實時檢測
 
 #### 姿態模式選擇區
@@ -291,11 +297,10 @@ runs/obb/train/
 
 #### 相機內參設定區
 - **相機內參設定**: 設定 Image Mode 使用的相機內部參數
-  - 支援從 RealSense 自動載入
-  - 支援自訂值並持久化
+   - 支援從 RealSense 自動載入
+   - 支援自訂值並持久化（`修改內參`）
 
-#### 視覺化選項區
-- **顯示 3D 視覺化**: 勾選後開啟 Open3D 視窗查看點雲和姿態
+（已精簡：移除 3D 視覺化選項）
 
 #### 儲存選項區
 - **自動儲存 JSON**: 勾選後檢測完自動保存結果至輸出目錄（用於機器手臂）
@@ -311,7 +316,7 @@ runs/obb/train/
 2. 選擇 **姿態模式**（Simple/Full）
 3. （可選）點 `模型路徑設定` 切換不同模型
 4. （可選）點 `相機內參設定` 調整相機參數
-5. 點 `🔍 開始檢測` 執行檢測
+5. 點 `🚀 開始檢測` 執行檢測
 6. 檢測完成後：
    - 結果自動儲存（如已勾選自動儲存）
    - 或點按鈕手動儲存 JSON/TXT/圖片
@@ -322,15 +327,28 @@ runs/obb/train/
 2. 點 `啟動相機` 開啟實時檢測
 3. 相機會自動讀取內參並進行檢測
 4. 結果實時顯示於畫面
-5. 點 `停止相機` 結束檢測
+5. 點 `停止` 結束檢測
 
-#### 結果說明
+#### 檢測結果格式
 
-檢測結果包含：
+JSON 內容包含：
 - **transform_matrix**: 4x4 變換矩陣（位置和旋轉）
 - **position**: 物體在相機坐標系中的 3D 位置（公尺）
 - **rotation_euler**: 歐拉角表示的旋轉（弧度）
-- **obb**: 旋轉邊界框信息
+- **obb**: 旋轉邊界框資訊
+
+Simple 與 Full 差異：
+- Simple：`roll_rad=0`, `pitch_rad=0`，僅有 `yaw_rad`
+- Full：完整 `roll_rad`, `pitch_rad`, `yaw_rad`，含 `surface_normal`
+
+輸出目錄結構：
+
+```
+{output_dir}/detections/
+├── json/
+├── txt/
+└── images/
+```
 
 ---
 
