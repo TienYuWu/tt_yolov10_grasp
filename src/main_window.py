@@ -1,4 +1,4 @@
-"""Main window - Tab container for Smart Label application."""
+"""Main window - Tab container"""
 
 import json
 from pathlib import Path
@@ -29,7 +29,7 @@ class MainWindow(QMainWindow):
             predictor: SAM predictor instance
         """
         super().__init__()
-        self.setWindowTitle("Smart Label - 智能標註與訓練工具")
+        self.setWindowTitle("TT_Yolov10_PileGrasp")
         self.config = config
 
         # Initialize Service Container

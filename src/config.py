@@ -1,4 +1,4 @@
-"""Configuration module for Smart Label application."""
+"""Configuration module"""
 
 import json
 from dataclasses import dataclass, field
@@ -151,7 +151,7 @@ class AppConfig:
         if not self.roi:
             return
 
-        config_dir = project_dir / ".smart_label"
+        config_dir = project_dir / ".tt_yolov10_pilegrasp"
         config_dir.mkdir(parents=True, exist_ok=True)
 
         config_path = config_dir / "roi_config.json"
@@ -176,7 +176,7 @@ class AppConfig:
         Returns:
             ROI dict or None if not found
         """
-        config_path = project_dir / ".smart_label" / "roi_config.json"
+        config_path = project_dir / ".tt_yolov10_pilegrasp" / "roi_config.json"
 
         if not config_path.exists():
             return None

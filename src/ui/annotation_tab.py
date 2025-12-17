@@ -1,4 +1,4 @@
-"""Annotation tab for Smart Label application."""
+"""Annotation tab"""
 
 import json
 import shutil

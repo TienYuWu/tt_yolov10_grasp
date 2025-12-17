@@ -20,8 +20,8 @@
 3. 建議使用 conda 建環境後再用 pip 安裝 PyTorch：
 
 ```powershell
-conda create -n smart_label_tt python=3.10 -y
-conda activate smart_label_tt
+conda create -n tt_yolov10_pilegrasp python=3.10 -y
+conda activate tt_yolov10_pilegrasp
 # 安裝其他 conda 套件 (可選): conda install -c conda-forge opencv numpy -y
 # 安裝 PyTorch + cu128 wheel
 pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.8.0+cu128 torchvision==0.23.0+cu128
@@ -58,4 +58,4 @@ python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 
 ---
 
-此檔為草稿，可根據你實際的 `smart_label.yaml` 與 `requirements.txt` 調整與精緻化。
+此檔為草稿，可根據你實際的 `tt_yolov10_pilegrasp.yaml` 與 `requirements.txt` 調整與精緻化。

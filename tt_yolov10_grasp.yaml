@@ -1,4 +1,4 @@
-name: try_smart_label
+name: tt_yolov10_pilegrasp
 channels:
   - pytorch
   - nvidia

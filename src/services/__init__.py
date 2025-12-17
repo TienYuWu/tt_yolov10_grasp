@@ -1,4 +1,4 @@
-"""Services layer for Smart Label application."""
+"""Services layer"""
 
 from .sam_service import SAMService
 from .yolo_service import YOLOService

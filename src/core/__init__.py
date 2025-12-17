@@ -1,4 +1,4 @@
-"""Core infrastructure for Smart Label application."""
+"""Core infrastructure"""
 
 from .event_bus import EventBus
 from .service_container import ServiceContainer

@@ -1,5 +1,4 @@
-"""Smart Label - 智能標註工具
-
+"""
 手動 SAM 微調的桌面應用程式。
 """
 
@@ -21,9 +20,7 @@ def parse_args() -> argparse.Namespace:
     Returns:
         Parsed arguments
     """
-    parser = argparse.ArgumentParser(
-        description="Smart Label - SAM 智能標註工具"
-    )
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         "--image-dir",
         type=str,
@@ -94,7 +91,7 @@ def create_config_from_args(args: argparse.Namespace) -> AppConfig:
 
 
 def main(argv: Optional[list] = None) -> int:
-    """Main entry point for Smart Label application.
+    """Main entry point.
 
     Args:
         argv: Command line arguments (for testing)
@@ -105,8 +102,6 @@ def main(argv: Optional[list] = None) -> int:
     args = parse_args() if argv is None else parse_args()
     config = create_config_from_args(args)
 
-    print("=" * 60)
-    print("Smart Label - 智能標註工具")
     print("=" * 60)
     print(f"裝置: {config.device}")
     print(f"SAM 模型: {config.model_type}")
@@ -125,8 +120,8 @@ def main(argv: Optional[list] = None) -> int:
 
     # Create Qt application
     app = QApplication(sys.argv)
-    app.setApplicationName("Smart Label")
-    app.setOrganizationName("Smart Label")
+    app.setApplicationName("TT_Yolov10_PileGrasp")
+    app.setOrganizationName("TT_Yolov10_PileGrasp")
 
     # Create and show main window
     try:

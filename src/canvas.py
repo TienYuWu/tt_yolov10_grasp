@@ -1,4 +1,4 @@
-"""Interactive canvas widget for Smart Label application."""
+"""Interactive canvas widget"""
 
 from typing import Dict, List, Optional, Tuple
 

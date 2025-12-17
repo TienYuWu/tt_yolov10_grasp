@@ -52,6 +52,18 @@ class DetectionService:
         print(f"📐 Pose mode: {self.pose_mode}")
         print(f"🖥️ Device: {self.device}")
 
+    def set_pose_mode(self, mode: str):
+        """Set pose estimation mode.
+
+        Args:
+            mode: Pose mode - 'simple' or 'full'
+        """
+        if mode not in ['simple', 'full']:
+            print(f"⚠️ Invalid pose mode: {mode}. Must be 'simple' or 'full'")
+            return
+        self.pose_mode = mode
+        print(f"✅ Pose mode changed to: {mode}")
+
     def detect_and_estimate_pose(
         self,
         rgb_image: np.ndarray,
@@ -453,12 +465,13 @@ class DetectionService:
         R_matrix = pose_matrix[:3, :3]
         euler = R.from_matrix(R_matrix).as_euler('xyz')  # Radians
 
-        # In simple mode, enforce roll=0 and pitch=0 explicitly
-        # (should already be ~0 from _calculate_simple_pose, but ensure exact 0)
+        # In simple mode, roll and pitch should naturally be ~0 (Z-only rotation)
+        # Just verify and log for debugging if needed
         if self.pose_mode == 'simple':
-            euler[0] = 0.0  # roll
-            euler[1] = 0.0  # pitch
-            # Keep yaw as calculated
+            if abs(euler[0]) > 1e-6 or abs(euler[1]) > 1e-6:
+                print(f"⚠️ Simple mode but roll/pitch not zero: roll={euler[0]:.6f}, pitch={euler[1]:.6f}")
+            else:
+                print(f"✅ Simple mode: roll={euler[0]:.10f}, pitch={euler[1]:.10f}, yaw={euler[2]:.6f}")
 
         # Extract axes
         x_axis = R_matrix[:, 0]

@@ -60,8 +60,7 @@ class DetectionTab(QWidget):
         self.detection_worker: Optional[DetectionWorker] = None
         self.camera_adapter = None  # Will be initialized when needed
 
-        # 3D visualization (optional feature)
-        self.visualizer_3d = None  # Initialized on demand when checkbox is checked
+        # 3D visualization removed
 
         # Current state
         self.current_image_path: Optional[Path] = None
@@ -496,95 +495,9 @@ class DetectionTab(QWidget):
         group.setLayout(layout)
         return group
 
-    def _create_parameters_group(self) -> QGroupBox:
-        """Create parameter adjustment group with sliders.
+    # Removed unused _create_parameters_group (duplicate of model settings)
 
-        Returns:
-            Parameters group box
-        """
-        group = QGroupBox("檢測參數")
-        layout = QVBoxLayout()
-
-        # Confidence threshold slider
-        conf_label = QLabel("信心度閾值 (Confidence)")
-        layout.addWidget(conf_label)
-
-        conf_slider_layout = QHBoxLayout()
-        self.confidence_slider = QSlider(Qt.Orientation.Horizontal)
-        self.confidence_slider.setMinimum(0)
-        self.confidence_slider.setMaximum(100)
-        self.confidence_slider.setValue(50)
-        self.confidence_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.confidence_slider.setTickInterval(10)
-        self.confidence_slider.valueChanged.connect(self._on_confidence_changed)
-        conf_slider_layout.addWidget(self.confidence_slider)
-
-        self.confidence_label = QLabel("0.50")
-        self.confidence_label.setMinimumWidth(40)
-        self.confidence_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        conf_slider_layout.addWidget(self.confidence_label)
-        layout.addLayout(conf_slider_layout)
-
-        # Separator
-        layout.addSpacing(10)
-
-        # IOU threshold slider
-        iou_label = QLabel("IoU 閾值")
-        layout.addWidget(iou_label)
-
-        iou_slider_layout = QHBoxLayout()
-        self.iou_slider = QSlider(Qt.Orientation.Horizontal)
-        self.iou_slider.setMinimum(0)
-        self.iou_slider.setMaximum(100)
-        self.iou_slider.setValue(45)
-        self.iou_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.iou_slider.setTickInterval(10)
-        self.iou_slider.valueChanged.connect(self._on_iou_changed)
-        iou_slider_layout.addWidget(self.iou_slider)
-
-        self.iou_label = QLabel("0.45")
-        self.iou_label.setMinimumWidth(40)
-        self.iou_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        iou_slider_layout.addWidget(self.iou_label)
-        layout.addLayout(iou_slider_layout)
-
-        group.setLayout(layout)
-        return group
-
-    def _create_visualization_group(self) -> QGroupBox:
-        """Create visualization options group.
-
-        Returns:
-            Visualization group box
-        """
-        group = QGroupBox("👁️ 可視化選項")
-        layout = QVBoxLayout()
-
-        self.show_obb_check = QCheckBox("顯示 OBB 框")
-        self.show_obb_check.setChecked(True)
-        layout.addWidget(self.show_obb_check)
-
-        self.show_axes_check = QCheckBox("顯示座標軸")
-        self.show_axes_check.setChecked(True)
-        layout.addWidget(self.show_axes_check)
-
-        self.show_pose_text_check = QCheckBox("顯示 HUD 疊加 (姿態/計數)")
-        self.show_pose_text_check.setToolTip("在影像上顯示姿態文字與檢測數量。預設關閉，資訊將在右側狀態區顯示。")
-        self.show_pose_text_check.setChecked(False)
-        layout.addWidget(self.show_pose_text_check)
-
-        self.show_depth_check = QCheckBox("顯示深度圖")
-        self.show_depth_check.setChecked(False)
-        layout.addWidget(self.show_depth_check)
-
-        self.show_3d_vis_check = QCheckBox("顯示 3D 姿態視窗")
-        self.show_3d_vis_check.setChecked(False)
-        self.show_3d_vis_check.setToolTip("開啟 Open3D 3D 可視化視窗 (顯示點雲、PCA 平面、法向量)")
-        self.show_3d_vis_check.stateChanged.connect(self._on_3d_vis_toggled)
-        layout.addWidget(self.show_3d_vis_check)
-
-        group.setLayout(layout)
-        return group
+    # Removed unused _create_visualization_group and 3D visualizer toggle
 
     def _create_results_group(self) -> QGroupBox:
         """Create detection results table group."""
@@ -592,10 +505,10 @@ class DetectionTab(QWidget):
         layout = QVBoxLayout()
 
         # Table
-        # Columns: ID, Confidence, PosX/PosY/PosZ in millimeters, Roll/Pitch/Yaw in radians
+        # Columns: ID, Confidence, PosX/PosY/PosZ in meters, Roll/Pitch/Yaw in radians
         self.results_table = QTableWidget(0, 8)
         self.results_table.setHorizontalHeaderLabels([
-            "ID", "Conf", "PosX (mm)", "PosY (mm)", "PosZ (mm)", "Roll (rad)", "Pitch (rad)", "Yaw (rad)"
+            "ID", "Conf", "PosX (m)", "PosY (m)", "PosZ (m)", "Roll (rad)", "Pitch (rad)", "Yaw (rad)"
         ])
         header = self.results_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -685,17 +598,7 @@ class DetectionTab(QWidget):
         console.log_info("Detection Tab initialized. Ready to start.")
         return console
 
-    def _create_separator(self) -> QWidget:
-        """Create a horizontal separator line.
-
-        Returns:
-            Separator widget
-        """
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setStyleSheet("background-color: #3e3e42;")
-        return line
+    # Removed unused _create_separator helper
 
     def _create_action_button(self) -> QWidget:
         """Create emphasized action button section.
@@ -1219,16 +1122,18 @@ class DetectionTab(QWidget):
         # Camera mode change handled by start button
 
     @Slot(int)
-    def _on_pose_mode_changed(self, button_id: int):
+    def _on_pose_mode_changed(self, button):
         """Handle pose mode change.
 
         Args:
-            button_id: Button ID (0=simple, 1=full)
+            button: QAbstractButton that was clicked
         """
+        button_id = self.pose_mode_group.id(button)
         if self.detection_service:
             new_mode = "simple" if button_id == 0 else "full"
             self.detection_service.set_pose_mode(new_mode)
             self.status_label.setText(f"姿態模式: {new_mode}")
+            print(f"✅ Pose mode changed to: {new_mode}")
 
     @Slot()
     def _on_model_settings(self):
@@ -1506,10 +1411,7 @@ class DetectionTab(QWidget):
                 mode='image',
                 image_path=self.current_image_path,
                 custom_intrinsics=self.custom_intrinsics,
-                show_obb=True,
-                show_axes=False,
-                show_pose_text=False,
-                show_detection_count=False
+                show_obb=True
             )
 
             # Connect signals
@@ -1544,10 +1446,7 @@ class DetectionTab(QWidget):
                 camera_adapter=self.camera_adapter,
                 target_fps=30.0,
                 custom_intrinsics=intrinsics_to_use,
-                show_obb=True,
-                show_axes=False,
-                show_pose_text=False,
-                show_detection_count=False
+                show_obb=True
             )
 
             # Connect signals
@@ -1711,37 +1610,7 @@ class DetectionTab(QWidget):
         """
         self.status_label.setText(message)
 
-    def _update_last_detection_summary(self, result: Dict):
-        """Render a compact summary of the last detection in the status panel."""
-        try:
-            count = result.get('metadata', {}).get('detection_count', 0)
-            if count == 0:
-                self.last_detection_label.setText("尚無檢測結果")
-                return
-
-            lines = [f"檢測數: {count}"]
-
-            detections = result.get('detections', [])
-            for det in detections[:3]:
-                pos = det.get('pose', {}).get('position', {})
-                rot = det.get('pose', {}).get('rotation_euler', {})
-                conf = det.get('confidence', 0.0)
-                det_id = det.get('detection_id', '-')
-                pos_x = pos.get('x', 0.0)
-                pos_y = pos.get('y', 0.0)
-                pos_z = pos.get('z', 0.0)
-                yaw = rot.get('yaw_rad', 0.0)
-                lines.append(
-                    f"ID {det_id} | conf {conf:.2f} | pos=({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f}) | yaw={yaw:.2f}"
-                )
-
-            if count > 3:
-                lines.append(f"... 另 {count - 3} 筆")
-
-            self.last_detection_label.setText("\n".join(lines))
-        except Exception:
-            # Avoid breaking UI on formatting errors
-            self.last_detection_label.setText("⚠️ 無法顯示摘要")
+    # Removed unused _update_last_detection_summary
 
     def _format_txt_output(self, result: Dict) -> list:
         """Format detection result as TXT lines.

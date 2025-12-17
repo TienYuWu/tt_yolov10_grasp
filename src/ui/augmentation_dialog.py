@@ -416,7 +416,7 @@ class AugmentationDialog(QDialog):
         )
 
         if ok and name:
-            presets_dir = Path.home() / ".smart_label" / "augmentation_presets"
+            presets_dir = Path.home() / ".tt_yolov10_pilegrasp" / "augmentation_presets"
             presets_dir.mkdir(parents=True, exist_ok=True)
 
             preset_file = presets_dir / f"{name}.json"
@@ -440,7 +440,7 @@ class AugmentationDialog(QDialog):
     @Slot()
     def _on_load_preset(self):
         """Load custom preset from file."""
-        presets_dir = Path.home() / ".smart_label" / "augmentation_presets"
+        presets_dir = Path.home() / ".tt_yolov10_pilegrasp" / "augmentation_presets"
         presets_dir.mkdir(parents=True, exist_ok=True)
 
         file_path, _ = QFileDialog.getOpenFileName(

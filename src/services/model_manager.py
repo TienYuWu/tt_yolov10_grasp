@@ -14,10 +14,10 @@ class ModelManager:
         """Initialize model manager.
 
         Args:
-            registry_dir: Directory for registry file (defaults to ~/.smart_label)
+            registry_dir: Directory for registry file (defaults to ~/.tt_yolov10_pilegrasp)
         """
         if registry_dir is None:
-            registry_dir = Path.home() / ".smart_label"
+            registry_dir = Path.home() / ".tt_yolov10_pilegrasp"
 
         self.registry_dir = registry_dir
         self.registry_dir.mkdir(parents=True, exist_ok=True)

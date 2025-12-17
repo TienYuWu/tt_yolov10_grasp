@@ -1,4 +1,4 @@
-"""Utility functions for Smart Label application."""
+"""Utility functions"""
 
 import json
 import urllib.request
@@ -135,7 +135,7 @@ def derive_default_output_dir(image_dir: Path) -> Path:
     """
     parent = image_dir.parent
     folder_name = image_dir.name
-    return parent / f"{folder_name}_smart_labels"
+    return parent / f"{folder_name}_annotated"
 
 
 def load_image(path: Path) -> Tuple[np.ndarray, np.ndarray]:

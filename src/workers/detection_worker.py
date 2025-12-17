@@ -35,10 +35,7 @@ class DetectionWorker(QThread):
         image_path: Optional[Path] = None,
         target_fps: float = 30.0,
         custom_intrinsics: Optional[Dict] = None,
-        show_obb: bool = True,
-        show_axes: bool = True,
-        show_pose_text: bool = False,
-        show_detection_count: bool = False
+        show_obb: bool = True
     ):
         """Initialize detection worker.
 
@@ -64,11 +61,8 @@ class DetectionWorker(QThread):
         self.frame_time = 1.0 / target_fps if target_fps > 0 else 0.0
         self.custom_intrinsics = custom_intrinsics
 
-        # Visualization toggles
+        # Visualization toggles (only OBB is supported)
         self.show_obb = show_obb
-        self.show_axes = show_axes
-        self.show_pose_text = show_pose_text
-        self.show_detection_count = show_detection_count
 
         self.running = False
         self.paused = False
@@ -422,12 +416,8 @@ class DetectionWorker(QThread):
             Annotated RGB image
         """
         from ..utils.visualization_utils import (
-            draw_obb_box,
-            draw_pose_info_text,
-            draw_fps_overlay,
-            draw_detection_count
+            draw_obb_box
         )
-        from ..utils.pose_utils import draw_coordinate_axes
 
         annotated = rgb_image.copy()
         camera_intrinsics = result['camera_intrinsics']
@@ -452,32 +442,7 @@ class DetectionWorker(QThread):
                     draw_corners=False
                 )
 
-            if self.show_axes:
-                T = np.array(pose['transform_matrix'])
-                annotated = draw_coordinate_axes(
-                    annotated,
-                    T=T,
-                    intrinsics=camera_intrinsics,
-                    length=0.05  # 5cm axes
-                )
-
-            if self.show_pose_text:
-                text_anchor = (int(obb['center'][0]) + 20, int(obb['center'][1]) - 20)
-                annotated = draw_pose_info_text(
-                    annotated,
-                    position=pose['position'],
-                    rotation_euler=pose['rotation_euler'],
-                    detection_id=det_id,
-                    confidence=confidence,
-                    anchor_point=text_anchor
-                )
-
-        if self.show_detection_count:
-            annotated = draw_detection_count(
-                annotated,
-                count=result['metadata']['detection_count'],
-                position='top-right'
-            )
+            # Axes / HUD overlays removed in streamlined view
 
         return annotated
 

@@ -1,4 +1,4 @@
-"""Utility modules for Smart Label application."""
+"""Utility modules"""
 
 # Lazy imports to avoid cv2/torch dependency errors at import time
 # Functions will be imported when first accessed
