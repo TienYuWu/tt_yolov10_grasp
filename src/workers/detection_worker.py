@@ -11,6 +11,7 @@ from typing import Dict, Optional
 
 import cv2
 import numpy as np
+import torch
 from PySide6.QtCore import QThread, Signal
 
 from ..services.detection_service import DetectionService
@@ -33,7 +34,11 @@ class DetectionWorker(QThread):
         camera_adapter: Optional[RealSenseService] = None,
         image_path: Optional[Path] = None,
         target_fps: float = 30.0,
-        custom_intrinsics: Optional[Dict] = None
+        custom_intrinsics: Optional[Dict] = None,
+        show_obb: bool = True,
+        show_axes: bool = True,
+        show_pose_text: bool = False,
+        show_detection_count: bool = False
     ):
         """Initialize detection worker.
 
@@ -45,6 +50,10 @@ class DetectionWorker(QThread):
             target_fps: Target FPS for camera mode (default: 30)
             custom_intrinsics: Custom camera intrinsics for image mode (optional)
                 Dict with keys: width, height, fx, fy, cx, cy
+            show_obb: Whether to draw OBB boxes on the annotated frame
+            show_axes: Whether to draw coordinate axes on the annotated frame
+            show_pose_text: Whether to draw pose text overlays (HUD) on the frame
+            show_detection_count: Whether to draw detection count HUD on the frame
         """
         super().__init__()
         self.detection_service = detection_service
@@ -54,6 +63,12 @@ class DetectionWorker(QThread):
         self.target_fps = target_fps
         self.frame_time = 1.0 / target_fps if target_fps > 0 else 0.0
         self.custom_intrinsics = custom_intrinsics
+
+        # Visualization toggles
+        self.show_obb = show_obb
+        self.show_axes = show_axes
+        self.show_pose_text = show_pose_text
+        self.show_detection_count = show_detection_count
 
         self.running = False
         self.paused = False
@@ -235,8 +250,12 @@ class DetectionWorker(QThread):
 
             self.status_message.emit("Starting camera feed...")
 
-            # Start camera
-            if hasattr(self.camera_adapter, 'start'):
+            # Check if camera is already started, only start if not started yet
+            if hasattr(self.camera_adapter, 'is_started'):
+                if not self.camera_adapter.is_started:
+                    self.camera_adapter.start()
+            elif hasattr(self.camera_adapter, 'start'):
+                # Fallback for cameras without is_started attribute
                 self.camera_adapter.start()
 
             frame_count = 0
@@ -302,11 +321,83 @@ class DetectionWorker(QThread):
                         time.sleep(self.frame_time - frame_elapsed)
 
                 except Exception as e:
-                    self.status_message.emit(f"Frame processing error: {e}")
+                    # Emit fallback frame and try minimal OBB drawing to keep UI usable
+                    import traceback
+                    traceback.print_exc()
+                    try:
+                        self.status_message.emit(f"Frame processing error: {e}")
+
+                        # Try to get intrinsics for metadata if available
+                        try:
+                            camera_intrinsics = self.camera_adapter.get_intrinsics()
+                        except Exception:
+                            camera_intrinsics = {
+                                'width': rgb_image.shape[1] if rgb_image is not None else 0,
+                                'height': rgb_image.shape[0] if rgb_image is not None else 0,
+                                'fx': 0.0, 'fy': 0.0, 'cx': 0.0, 'cy': 0.0
+                            }
+
+                        fallback_result = {
+                            'metadata': {
+                                'timestamp': time.time(),
+                                'source_type': 'camera',
+                                'source_path': None,
+                                'pose_mode': getattr(self.detection_service, 'pose_mode', 'simple'),
+                                'model_path': str(getattr(self.detection_service, 'model_path', '')),
+                                'processing_time_ms': 0.0,
+                                'detection_count': 0
+                            },
+                            'camera_intrinsics': camera_intrinsics,
+                            'detections': []
+                        }
+
+                        annotated = rgb_image.copy() if rgb_image is not None else None
+
+                        # Attempt minimal OBB-only overlay using YOLO directly
+                        try:
+                            from ..utils.visualization_utils import draw_obb_box
+                            with torch.no_grad():
+                                yolo_results = self.detection_service.model(
+                                    rgb_image,
+                                    device=self.detection_service.device,
+                                    imgsz=640,
+                                    verbose=False,
+                                    conf=self.detection_service.conf_threshold,
+                                    iou=self.detection_service.iou_threshold
+                                )
+                            if yolo_results and len(yolo_results) > 0 and getattr(yolo_results[0], 'obb', None):
+                                for box in yolo_results[0].obb:
+                                    if hasattr(box, 'xywhr'):
+                                        data = box.data.cpu().numpy()[0]
+                                        x, y, w, h, r = data[0:5]
+                                        corners = None  # optional
+                                        annotated = draw_obb_box(
+                                            annotated,
+                                            center=(float(x), float(y)),
+                                            width=float(w),
+                                            height=float(h),
+                                            rotation_rad=float(r),
+                                            corners=corners,
+                                            color=(0, 255, 0),
+                                            thickness=1,
+                                            draw_corners=False
+                                        )
+                        except Exception:
+                            # If even this fails, just fall back to raw frame
+                            pass
+
+                        if annotated is not None:
+                            self.detection_completed.emit(fallback_result, annotated)
+                    except Exception:
+                        pass
                     time.sleep(0.1)
 
-            # Stop camera
-            if hasattr(self.camera_adapter, 'stop'):
+            # Stop camera safely
+            if hasattr(self.camera_adapter, 'is_started') and self.camera_adapter.is_started:
+                if hasattr(self.camera_adapter, 'stop'):
+                    self.camera_adapter.stop()
+            elif hasattr(self.camera_adapter, 'stop'):
+                # Fallback for cameras without is_started
                 self.camera_adapter.stop()
 
             self.status_message.emit("Camera stopped")
@@ -348,44 +439,45 @@ class DetectionWorker(QThread):
             confidence = detection['confidence']
             det_id = detection['detection_id']
 
-            # Draw OBB box (RGB format: Green)
-            annotated = draw_obb_box(
-                annotated,
-                center=obb['center'],
-                width=obb['width'],
-                height=obb['height'],
-                rotation_rad=obb['rotation_rad'],
-                corners=obb['corners'],
-                color=(0, 255, 0),  # RGB: Green
-                thickness=2
-            )
+            if self.show_obb:
+                annotated = draw_obb_box(
+                    annotated,
+                    center=obb['center'],
+                    width=obb['width'],
+                    height=obb['height'],
+                    rotation_rad=obb['rotation_rad'],
+                    corners=obb['corners'],
+                    color=(0, 255, 0),  # RGB: Green
+                    thickness=1,
+                    draw_corners=False
+                )
 
-            # Draw coordinate axes
-            T = np.array(pose['transform_matrix'])
-            annotated = draw_coordinate_axes(
-                annotated,
-                T=T,
-                intrinsics=camera_intrinsics,
-                length=0.05  # 5cm axes
-            )
+            if self.show_axes:
+                T = np.array(pose['transform_matrix'])
+                annotated = draw_coordinate_axes(
+                    annotated,
+                    T=T,
+                    intrinsics=camera_intrinsics,
+                    length=0.05  # 5cm axes
+                )
 
-            # Draw pose info text
-            text_anchor = (int(obb['center'][0]) + 20, int(obb['center'][1]) - 20)
-            annotated = draw_pose_info_text(
-                annotated,
-                position=pose['position'],
-                rotation_euler=pose['rotation_euler'],
-                detection_id=det_id,
-                confidence=confidence,
-                anchor_point=text_anchor
-            )
+            if self.show_pose_text:
+                text_anchor = (int(obb['center'][0]) + 20, int(obb['center'][1]) - 20)
+                annotated = draw_pose_info_text(
+                    annotated,
+                    position=pose['position'],
+                    rotation_euler=pose['rotation_euler'],
+                    detection_id=det_id,
+                    confidence=confidence,
+                    anchor_point=text_anchor
+                )
 
-        # Draw detection count
-        annotated = draw_detection_count(
-            annotated,
-            count=result['metadata']['detection_count'],
-            position='top-right'
-        )
+        if self.show_detection_count:
+            annotated = draw_detection_count(
+                annotated,
+                count=result['metadata']['detection_count'],
+                position='top-right'
+            )
 
         return annotated
 
@@ -393,6 +485,20 @@ class DetectionWorker(QThread):
         """Stop the worker."""
         self.running = False
         self.status_message.emit("Stopping worker...")
+
+        # In camera mode, proactively stop camera to unblock wait_for_frames
+        if self.mode == 'camera':
+            try:
+                if self.camera_adapter is not None:
+                    if hasattr(self.camera_adapter, 'is_started'):
+                        if self.camera_adapter.is_started and hasattr(self.camera_adapter, 'stop'):
+                            self.camera_adapter.stop()
+                    elif hasattr(self.camera_adapter, 'stop'):
+                        # Fallback for adapters without is_started attribute
+                        self.camera_adapter.stop()
+            except Exception:
+                # Suppress exceptions during shutdown
+                pass
 
     def pause(self):
         """Pause camera feed (camera mode only)."""

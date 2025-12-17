@@ -202,10 +202,6 @@ def draw_coordinate_axes(
     # Z-axis = Blue
     cv2.arrowedLine(output, origin_px, z_end_px, (0, 0, 255), 2, tipLength=0.3)
 
-    # Draw small circle at origin for visibility
-    cv2.circle(output, origin_px, 5, (255, 255, 255), -1)
-    cv2.circle(output, origin_px, 5, (0, 0, 0), 2)
-
     return output
 
 

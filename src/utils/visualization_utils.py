@@ -18,9 +18,11 @@ def draw_obb_box(
     rotation_rad: float,
     corners: Optional[List[Tuple[float, float]]] = None,
     color: Tuple[int, int, int] = (0, 255, 0),
-    thickness: int = 2,
+    thickness: int = 1,
     draw_corners: bool = True,
-    draw_center: bool = True
+    draw_center: bool = False,
+    draw_cross: bool = True,
+    cross_color: Tuple[int, int, int] = (255, 0, 0)
 ) -> np.ndarray:
     """Draw oriented bounding box on image.
 
@@ -81,16 +83,34 @@ def draw_obb_box(
     # Draw box edges
     cv2.polylines(output, [pts], isClosed=True, color=color, thickness=thickness)
 
-    # Draw corners as circles
+    # Draw corners as circles (optional)
     if draw_corners:
         for corner in pts:
             cv2.circle(output, tuple(corner), 4, color, -1)
 
-    # Draw center
-    if draw_center:
-        center_px = (int(center[0]), int(center[1]))
-        cv2.circle(output, center_px, 6, color, -1)
-        cv2.circle(output, center_px, 6, (255, 255, 255), 2)
+    # Draw oriented cross aligned to OBB axes
+    if draw_cross:
+        cx, cy = center
+        cos_angle = np.cos(rotation_rad)
+        sin_angle = np.sin(rotation_rad)
+
+        # Axis unit vectors (x: width direction, y: height direction)
+        axis_x = np.array([cos_angle, sin_angle])
+        axis_y = np.array([-sin_angle, cos_angle])
+
+        # Cross arm lengths (30% of width/height each side)
+        arm_x = 0.3 * width / 2.0
+        arm_y = 0.3 * height / 2.0
+
+        pts_cross = [
+            (int(cx - axis_x[0] * arm_x), int(cy - axis_x[1] * arm_x)),
+            (int(cx + axis_x[0] * arm_x), int(cy + axis_x[1] * arm_x)),
+            (int(cx - axis_y[0] * arm_y), int(cy - axis_y[1] * arm_y)),
+            (int(cx + axis_y[0] * arm_y), int(cy + axis_y[1] * arm_y)),
+        ]
+
+        cv2.line(output, pts_cross[0], pts_cross[1], cross_color, thickness, cv2.LINE_AA)
+        cv2.line(output, pts_cross[2], pts_cross[3], cross_color, thickness, cv2.LINE_AA)
 
     return output
 
@@ -390,7 +410,6 @@ def draw_detection_count(
     )
 
     return output
-
 
 def create_side_by_side_view(
     rgb_image: np.ndarray,

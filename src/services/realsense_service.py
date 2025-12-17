@@ -21,6 +21,7 @@ Output formats:
 """
 
 import cv2
+import threading
 import numpy as np
 import pyrealsense2 as rs
 from typing import Tuple, Dict
@@ -65,18 +66,16 @@ class RealSenseService:
         self.width = width
         self.height = height
         self.fps = fps
+        self.is_started = False  # State tracking
+        self._lock = threading.Lock()  # Thread-safety for start/stop
 
         # Initialize RealSense pipeline
         self.pipeline = rs.pipeline()
-        config = rs.config()
+        self.config = rs.config()
 
         # Configure RGB and depth streams
-        config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
-        config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
-
-        print(f"正在啟動 RealSense 相機 ({width}x{height} @ {fps}fps)...")
-        self.profile = self.pipeline.start(config)
-        print("RealSense 相機已啟動")
+        self.config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
+        self.config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
 
         # Align depth to color frame
         self.align = rs.align(rs.stream.color)
@@ -84,16 +83,48 @@ class RealSenseService:
         # Temporal filter for depth noise reduction
         self.temporal_filter = rs.temporal_filter() if enable_temporal_filter else None
 
-        # Extract depth scale (default: 0.001, meaning 1mm = 1 unit)
-        self.depth_scale = self.profile.get_device().first_depth_sensor().get_depth_scale()
+        # Initialize intrinsics and depth_scale as None (set during start())
+        self.profile = None
+        self.intrinsics = None
+        self.depth_scale = None
 
-        # Extract camera intrinsics
-        depth_profile = self.profile.get_stream(rs.stream.depth)
-        self.intrinsics = depth_profile.as_video_stream_profile().get_intrinsics()
+    # ================================================================
+    # Lifecycle Management
+    # ================================================================
 
-        print(f"深度縮放比例: {self.depth_scale}")
-        print(f"相機內參: fx={self.intrinsics.fx:.2f}, fy={self.intrinsics.fy:.2f}, "
-              f"cx={self.intrinsics.ppx:.2f}, cy={self.intrinsics.ppy:.2f}")
+    def start(self):
+        """Start the RealSense pipeline.
+
+        Raises:
+            RuntimeError: If camera is already started or initialization fails
+        """
+        with self._lock:
+            if self.is_started:
+                print("⚠️ RealSense camera is already started")
+                return
+
+            try:
+                print(f"正在啟動 RealSense 相機 ({self.width}x{self.height} @ {self.fps}fps)...")
+                self.profile = self.pipeline.start(self.config)
+                # Mark started immediately after successful start
+                self.is_started = True
+                print("RealSense 相機已啟動")
+
+                # Extract depth scale (default: 0.001, meaning 1mm = 1 unit)
+                self.depth_scale = self.profile.get_device().first_depth_sensor().get_depth_scale()
+
+                # Extract camera intrinsics
+                depth_profile = self.profile.get_stream(rs.stream.depth)
+                self.intrinsics = depth_profile.as_video_stream_profile().get_intrinsics()
+
+                print(f"深度縮放比例: {self.depth_scale}")
+                print(f"相機內參: fx={self.intrinsics.fx:.2f}, fy={self.intrinsics.fy:.2f}, "
+                      f"cx={self.intrinsics.ppx:.2f}, cy={self.intrinsics.ppy:.2f}")
+            except Exception as e:
+                # Ensure state is consistent on failure
+                self.is_started = False
+                print(f"❌ 無法啟動 RealSense 相機: {e}")
+                raise
 
     # ================================================================
     # Original Interface (from realsense_adapter.py)
@@ -190,12 +221,20 @@ class RealSenseService:
             color space from BGR (RealSense native) to RGB (standard).
         """
         # Get RGBD frame using original interface
-        color_bgr, depth, _ = self.get_rgbd_frame()
+        color_bgr, depth_mm, _ = self.get_rgbd_frame()
 
         # Convert BGR to RGB for compatibility
         rgb = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2RGB)
 
-        return rgb, depth
+        # Convert depth from uint16 millimeters to float32 meters
+        # RealSense depth_scale is typically 0.001 (1 mm). Use device-provided scale.
+        if depth_mm.dtype != np.float32:
+            depth_m = depth_mm.astype(np.float32) * (self.depth_scale if self.depth_scale else 0.001)
+        else:
+            # Already float (rare); assume it's in meters
+            depth_m = depth_mm
+
+        return rgb, depth_m
 
     def get_intrinsics(self) -> Dict:
         """
@@ -215,13 +254,33 @@ class RealSenseService:
     # ================================================================
 
     def stop(self):
-        """Stop RealSense pipeline and release resources."""
-        print("正在停止 RealSense 相機...")
-        self.pipeline.stop()
-        print("RealSense 相機已停止")
+        """Stop RealSense pipeline and release resources.
+
+        Safe to call multiple times or if not started. Thread-safe.
+        """
+        with self._lock:
+            if not self.is_started:
+                print("⚠️ RealSense camera is not started")
+                return
+
+            # Mark stopped before calling SDK to avoid race with a concurrent stop
+            self.is_started = False
+
+            try:
+                print("正在停止 RealSense 相機...")
+                self.pipeline.stop()
+                print("RealSense 相機已停止")
+            except Exception as e:
+                # Suppress the common 'stop before start' race from SDK
+                msg = str(e)
+                if 'before start' in msg.lower():
+                    print("⚠️ RealSense pipeline.stop reported 'before start' (ignored)")
+                else:
+                    print(f"❌ 停止相機時發生錯誤: {e}")
 
     def __enter__(self):
         """Context manager entry (supports 'with' statement)."""
+        self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

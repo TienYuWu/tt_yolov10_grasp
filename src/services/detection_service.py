@@ -453,6 +453,13 @@ class DetectionService:
         R_matrix = pose_matrix[:3, :3]
         euler = R.from_matrix(R_matrix).as_euler('xyz')  # Radians
 
+        # In simple mode, enforce roll=0 and pitch=0 explicitly
+        # (should already be ~0 from _calculate_simple_pose, but ensure exact 0)
+        if self.pose_mode == 'simple':
+            euler[0] = 0.0  # roll
+            euler[1] = 0.0  # pitch
+            # Keep yaw as calculated
+
         # Extract axes
         x_axis = R_matrix[:, 0]
         y_axis = R_matrix[:, 1]

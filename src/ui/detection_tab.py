@@ -14,8 +14,24 @@ from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QGroupBox, QFileDialog, QMessageBox, QRadioButton,
-    QButtonGroup, QCheckBox, QSplitter, QLineEdit, QFrame
+    QButtonGroup, QCheckBox, QSplitter, QLineEdit, QFrame, QScrollArea,
+    QSlider, QSpinBox, QDoubleSpinBox, QDialog, QTableWidget, QTableWidgetItem,
+    QHeaderView
 )
+
+
+class NoWheelSpinBox(QSpinBox):
+    """SpinBox that ignores mouse wheel to prevent accidental changes."""
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+class NoWheelDoubleSpinBox(QDoubleSpinBox):
+    """DoubleSpinBox that ignores mouse wheel to prevent accidental changes."""
+
+    def wheelEvent(self, event):
+        event.ignore()
 
 from .detection_canvas import DetectionCanvas
 from .widgets import OutputConsole
@@ -56,22 +72,32 @@ class DetectionTab(QWidget):
         # Camera intrinsics for image mode
         self.custom_intrinsics = self._load_intrinsics_from_config()
 
+        # Camera intrinsics for camera mode (read from RealSense factory calibration)
+        self.camera_intrinsics = None
+
+        # Detection parameters (tunable at runtime)
+        self.confidence_threshold = 0.5
+        self.iou_threshold = 0.45
+
+        # Start/Stop toggle state
+        self.is_detecting = False
+
         self._build_ui()
         self._connect_signals()
         self._initialize_service()
 
     def _build_ui(self):
-        """Build the detection tab UI with vertical split layout.
+        """Build the detection tab UI with a two-pane layout.
 
         Layout structure:
-        - Vertical Splitter (outer):
-          - Top (70%): Horizontal Splitter (Canvas + Controls)
-          - Bottom (30%): Output Console
+        - Horizontal Splitter: Canvas (left) + Controls (right)
+        - Output console kept hidden for logging only (no bottom pane)
         """
         main_layout = QVBoxLayout()
 
-        # ========== OUTER VERTICAL SPLITTER ==========
-        vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        # Hidden output console (kept for logging but not shown in UI)
+        self.output_console = self._create_output_console()
+        self.output_console.setVisible(False)
 
         # ========== TOP SECTION: Canvas + Control Panel ==========
         top_widget = QWidget()
@@ -80,9 +106,11 @@ class DetectionTab(QWidget):
 
         # Left panel: Canvas (70%)
         left_panel = self._create_canvas_panel()
+        left_panel.setMinimumWidth(520)
 
         # Right panel: Controls (30%)
         right_panel = self._create_control_panel()
+        right_panel.setMinimumWidth(320)
 
         # Inner horizontal splitter
         horizontal_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -90,25 +118,12 @@ class DetectionTab(QWidget):
         horizontal_splitter.addWidget(right_panel)
         horizontal_splitter.setStretchFactor(0, 7)  # 70% for canvas
         horizontal_splitter.setStretchFactor(1, 3)  # 30% for controls
+        horizontal_splitter.setChildrenCollapsible(False)
 
         top_layout.addWidget(horizontal_splitter)
         top_widget.setLayout(top_layout)
 
-        # ========== BOTTOM SECTION: Output Console ==========
-        self.output_console = self._create_output_console()
-
-        # Add both sections to vertical splitter
-        vertical_splitter.addWidget(top_widget)
-        vertical_splitter.addWidget(self.output_console)
-
-        # Set vertical splitter proportions (70% top, 30% bottom)
-        vertical_splitter.setStretchFactor(0, 7)
-        vertical_splitter.setStretchFactor(1, 3)
-
-        # Prevent full collapse of either section
-        vertical_splitter.setChildrenCollapsible(False)
-
-        main_layout.addWidget(vertical_splitter)
+        main_layout.addWidget(top_widget)
         self.setLayout(main_layout)
 
     def _create_canvas_panel(self) -> QWidget:
@@ -171,79 +186,98 @@ class DetectionTab(QWidget):
             Control panel widget
         """
         panel = QWidget()
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # ========== Pinned: Setup (Collapsible with internal scroll) ==========
+        setup_group = self._create_setup_group()
+        main_layout.addWidget(setup_group)
+
+        # ========== Pinned: Action ==========
+        action_label = QLabel("▶️ Action")
+        action_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #4ec9b0;")
+        main_layout.addWidget(action_label)
+
+        action_button_widget = self._create_action_button()
+        main_layout.addWidget(action_button_widget, 0)
+
+        # ========== Pinned: Results ==========
+        results_label = QLabel("📄 Results")
+        results_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #c586c0;")
+        main_layout.addWidget(results_label)
+
+        results_group = self._create_results_group()
+        main_layout.addWidget(results_group)
+
+        # ========== Pinned: Storage ==========
+        storage_label = QLabel("💾 Storage")
+        storage_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #dcdcaa;")
+        main_layout.addWidget(storage_label)
+
+        save_group = self._create_save_group()
+        main_layout.addWidget(save_group)
+
+        # ========== Pinned: Status ==========
+        status_group = self._create_status_group()
+        main_layout.addWidget(status_group)
+
+        panel.setLayout(main_layout)
+        return panel
+
+    def _create_setup_group(self) -> QGroupBox:
+        """Create collapsible Setup group with scrollable content.
+
+        Contains: Input Source, Model Settings, Pose Mode, Intrinsics, Visualization
+
+        Returns:
+            Setup group box
+        """
+        group = QGroupBox("⚙️ Setup")
+        group.setStyleSheet("QGroupBox { font-size: 14px; font-weight: bold; }")
+        group.setCheckable(True)
+        group.setChecked(True)  # Expanded by default
+        main_layout = QVBoxLayout()
+
+        # Create internal scroll area for all setup items
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("QScrollArea { border: none; }")
+        scroll_area.setMaximumHeight(400)  # Limit height to allow scrolling
+
+        scroll_widget = QWidget()
         layout = QVBoxLayout()
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(8)
 
-        # ========== GROUP 1: SETUP (設定區) ==========
-        setup_label = QLabel("⚙️ SETUP")
-        setup_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #0078d4;")
-        layout.addWidget(setup_label)
-
-        # Input source group
+        # 1. Input source
         input_group = self._create_input_source_group()
         layout.addWidget(input_group)
 
-        # Model settings group
+        # 2. Model settings (now includes parameters)
         model_group = self._create_model_settings_group()
         layout.addWidget(model_group)
 
-        # Pose mode group
+        # 3. Pose mode
         pose_group = self._create_pose_mode_group()
         layout.addWidget(pose_group)
 
-        # Camera intrinsics group
+        # 4. Camera intrinsics (inline editable)
         intrinsics_group = self._create_intrinsics_group()
         layout.addWidget(intrinsics_group)
 
-        # Separator
-        layout.addWidget(self._create_separator())
-
-        # ========== GROUP 2: ACTION (動作區，強調) ==========
-        action_label = QLabel("▶️ ACTION")
-        action_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #4ec9b0;")
-        layout.addWidget(action_label)
-
-        action_button_widget = self._create_action_button()
-        layout.addWidget(action_button_widget)
-
-        # Separator
-        layout.addWidget(self._create_separator())
-
-        # ========== GROUP 3: VISUALIZATION (視覺化) ==========
-        viz_label = QLabel("👁️ VISUALIZATION")
-        viz_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #ce9178;")
-        layout.addWidget(viz_label)
-
-        vis_group = self._create_visualization_group()
-        layout.addWidget(vis_group)
-
-        # Separator
-        layout.addWidget(self._create_separator())
-
-        # ========== GROUP 4: STORAGE (儲存) ==========
-        storage_label = QLabel("💾 STORAGE")
-        storage_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #dcdcaa;")
-        layout.addWidget(storage_label)
-
-        save_group = self._create_save_group()
-        layout.addWidget(save_group)
-
-        # Flexible space to push content to top
+        # Flexible space
         layout.addStretch()
 
-        # ========== STATUS INDICATOR (底部) ==========
-        # 保留精簡的狀態指示器在控制面板底部
-        status_group = self._create_status_group()
-        layout.addWidget(status_group)
+        scroll_widget.setLayout(layout)
+        scroll_area.setWidget(scroll_widget)
+        main_layout.addWidget(scroll_area)
 
-        panel.setLayout(layout)
-        return panel
+        group.setLayout(main_layout)
+        return group
 
     def _create_input_source_group(self) -> QGroupBox:
-        """Create input source selection group.
-
-        Returns:
-            Input source group box
-        """
+        """Create input source selection group."""
         group = QGroupBox("📂 輸入來源")
         layout = QVBoxLayout()
 
@@ -315,7 +349,7 @@ class DetectionTab(QWidget):
         return group
 
     def _create_model_settings_group(self) -> QGroupBox:
-        """Create model path settings group.
+        """Create model settings group including path and detection parameters.
 
         Returns:
             Model settings group box
@@ -323,41 +357,196 @@ class DetectionTab(QWidget):
         group = QGroupBox("🤖 模型設定")
         layout = QVBoxLayout()
 
-        # Settings button
+        # Model path button
         model_btn = QPushButton("模型路徑設定")
         model_btn.clicked.connect(self._on_model_settings)
         model_btn.setToolTip("設定 YOLO OBB 模型檔案路徑")
         layout.addWidget(model_btn)
 
-        # Status label
+        # Model status label
         self.model_status_label = QLabel("模型: 未載入")
         self.model_status_label.setWordWrap(True)
         self.model_status_label.setStyleSheet("QLabel { font-size: 10px; color: gray; }")
         layout.addWidget(self.model_status_label)
 
+        # Separator
+        layout.addSpacing(10)
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(separator)
+        layout.addSpacing(5)
+
+        # Detection parameters
+        params_title = QLabel("🎚️ 檢測參數")
+        params_title.setStyleSheet("font-weight: bold;")
+        layout.addWidget(params_title)
+
+        # Confidence threshold slider
+        conf_label = QLabel("信心度閖值 (Confidence)")
+        layout.addWidget(conf_label)
+
+        conf_slider_layout = QHBoxLayout()
+        self.confidence_slider = QSlider(Qt.Orientation.Horizontal)
+        self.confidence_slider.setMinimum(0)
+        self.confidence_slider.setMaximum(100)
+        self.confidence_slider.setValue(50)
+        self.confidence_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.confidence_slider.setTickInterval(10)
+        self.confidence_slider.valueChanged.connect(self._on_confidence_changed)
+        conf_slider_layout.addWidget(self.confidence_slider)
+
+        self.confidence_label = QLabel("0.50")
+        self.confidence_label.setMinimumWidth(40)
+        self.confidence_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        conf_slider_layout.addWidget(self.confidence_label)
+        layout.addLayout(conf_slider_layout)
+
+        # Separator
+        layout.addSpacing(10)
+
+        # IOU threshold slider
+        iou_label = QLabel("IoU 閖值")
+        layout.addWidget(iou_label)
+
+        iou_slider_layout = QHBoxLayout()
+        self.iou_slider = QSlider(Qt.Orientation.Horizontal)
+        self.iou_slider.setMinimum(0)
+        self.iou_slider.setMaximum(100)
+        self.iou_slider.setValue(45)
+        self.iou_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.iou_slider.setTickInterval(10)
+        self.iou_slider.valueChanged.connect(self._on_iou_changed)
+        iou_slider_layout.addWidget(self.iou_slider)
+
+        self.iou_label = QLabel("0.45")
+        self.iou_label.setMinimumWidth(40)
+        self.iou_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        iou_slider_layout.addWidget(self.iou_label)
+        layout.addLayout(iou_slider_layout)
+
         group.setLayout(layout)
         return group
 
     def _create_intrinsics_group(self) -> QGroupBox:
-        """Create camera intrinsics settings group.
-
-        Returns:
-            Camera intrinsics group box
-        """
-        group = QGroupBox("相機內部參數")
+        """Create camera intrinsics inline editor group with apply confirmation."""
+        group = QGroupBox("📷 相機內部參數")
+        group.setStyleSheet("QGroupBox { font-size: 13px; font-weight: bold; }")
         layout = QVBoxLayout()
 
-        # Settings button
-        intrinsics_btn = QPushButton("相機內參設定")
-        intrinsics_btn.clicked.connect(self._on_intrinsics_settings)
-        intrinsics_btn.setToolTip("設定 Image mode 使用的相機內部參數")
-        layout.addWidget(intrinsics_btn)
+        # Resolution (stacked, minimal left/right splitting)
+        layout.addWidget(QLabel("解析度"))
+        res_row = QHBoxLayout()
+        self.intrinsics_width = NoWheelSpinBox()
+        self.intrinsics_width.setRange(320, 3840)
+        self.intrinsics_width.setValue(self.custom_intrinsics['width'])
+        self.intrinsics_width.setToolTip("影像寬度 (pixels)")
+        self.intrinsics_width.valueChanged.connect(self._on_intrinsics_changed)
+        res_row.addWidget(self.intrinsics_width)
+        res_row.addWidget(QLabel("×"))
+        self.intrinsics_height = NoWheelSpinBox()
+        self.intrinsics_height.setRange(240, 2160)
+        self.intrinsics_height.setValue(self.custom_intrinsics['height'])
+        self.intrinsics_height.setToolTip("影像高度 (pixels)")
+        self.intrinsics_height.valueChanged.connect(self._on_intrinsics_changed)
+        res_row.addWidget(self.intrinsics_height)
+        layout.addLayout(res_row)
 
-        # Status label
-        self.intrinsics_status_label = QLabel("內參: 使用預設值")
-        self.intrinsics_status_label.setWordWrap(True)
-        self.intrinsics_status_label.setStyleSheet("QLabel { font-size: 10px; color: gray; }")
-        layout.addWidget(self.intrinsics_status_label)
+        layout.addWidget(QLabel("fx"))
+        self.intrinsics_fx = NoWheelDoubleSpinBox()
+        self.intrinsics_fx.setRange(1.0, 5000.0)
+        self.intrinsics_fx.setDecimals(2)
+        self.intrinsics_fx.setValue(self.custom_intrinsics['fx'])
+        self.intrinsics_fx.setToolTip("焦距 X (pixels)")
+        self.intrinsics_fx.valueChanged.connect(self._on_intrinsics_changed)
+        layout.addWidget(self.intrinsics_fx)
+
+        layout.addWidget(QLabel("fy"))
+        self.intrinsics_fy = NoWheelDoubleSpinBox()
+        self.intrinsics_fy.setRange(1.0, 5000.0)
+        self.intrinsics_fy.setDecimals(2)
+        self.intrinsics_fy.setValue(self.custom_intrinsics['fy'])
+        self.intrinsics_fy.setToolTip("焦距 Y (pixels)")
+        self.intrinsics_fy.valueChanged.connect(self._on_intrinsics_changed)
+        layout.addWidget(self.intrinsics_fy)
+
+        layout.addWidget(QLabel("cx"))
+        self.intrinsics_cx = NoWheelDoubleSpinBox()
+        self.intrinsics_cx.setRange(0.0, 3840.0)
+        self.intrinsics_cx.setDecimals(2)
+        self.intrinsics_cx.setValue(self.custom_intrinsics['cx'])
+        self.intrinsics_cx.setToolTip("主點 X (pixels)")
+        self.intrinsics_cx.valueChanged.connect(self._on_intrinsics_changed)
+        layout.addWidget(self.intrinsics_cx)
+
+        layout.addWidget(QLabel("cy"))
+        self.intrinsics_cy = NoWheelDoubleSpinBox()
+        self.intrinsics_cy.setRange(0.0, 2160.0)
+        self.intrinsics_cy.setDecimals(2)
+        self.intrinsics_cy.setValue(self.custom_intrinsics['cy'])
+        self.intrinsics_cy.setToolTip("主點 Y (pixels)")
+        self.intrinsics_cy.valueChanged.connect(self._on_intrinsics_changed)
+        layout.addWidget(self.intrinsics_cy)
+
+        apply_btn = QPushButton("修改內參")
+        apply_btn.setToolTip("點擊後確認並套用目前欄位值，並儲存設定")
+        apply_btn.clicked.connect(self._on_intrinsics_apply_clicked)
+        layout.addWidget(apply_btn)
+
+        group.setLayout(layout)
+        return group
+
+    def _create_parameters_group(self) -> QGroupBox:
+        """Create parameter adjustment group with sliders.
+
+        Returns:
+            Parameters group box
+        """
+        group = QGroupBox("檢測參數")
+        layout = QVBoxLayout()
+
+        # Confidence threshold slider
+        conf_label = QLabel("信心度閾值 (Confidence)")
+        layout.addWidget(conf_label)
+
+        conf_slider_layout = QHBoxLayout()
+        self.confidence_slider = QSlider(Qt.Orientation.Horizontal)
+        self.confidence_slider.setMinimum(0)
+        self.confidence_slider.setMaximum(100)
+        self.confidence_slider.setValue(50)
+        self.confidence_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.confidence_slider.setTickInterval(10)
+        self.confidence_slider.valueChanged.connect(self._on_confidence_changed)
+        conf_slider_layout.addWidget(self.confidence_slider)
+
+        self.confidence_label = QLabel("0.50")
+        self.confidence_label.setMinimumWidth(40)
+        self.confidence_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        conf_slider_layout.addWidget(self.confidence_label)
+        layout.addLayout(conf_slider_layout)
+
+        # Separator
+        layout.addSpacing(10)
+
+        # IOU threshold slider
+        iou_label = QLabel("IoU 閾值")
+        layout.addWidget(iou_label)
+
+        iou_slider_layout = QHBoxLayout()
+        self.iou_slider = QSlider(Qt.Orientation.Horizontal)
+        self.iou_slider.setMinimum(0)
+        self.iou_slider.setMaximum(100)
+        self.iou_slider.setValue(45)
+        self.iou_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.iou_slider.setTickInterval(10)
+        self.iou_slider.valueChanged.connect(self._on_iou_changed)
+        iou_slider_layout.addWidget(self.iou_slider)
+
+        self.iou_label = QLabel("0.45")
+        self.iou_label.setMinimumWidth(40)
+        self.iou_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        iou_slider_layout.addWidget(self.iou_label)
+        layout.addLayout(iou_slider_layout)
 
         group.setLayout(layout)
         return group
@@ -379,8 +568,9 @@ class DetectionTab(QWidget):
         self.show_axes_check.setChecked(True)
         layout.addWidget(self.show_axes_check)
 
-        self.show_pose_text_check = QCheckBox("顯示姿態文字")
-        self.show_pose_text_check.setChecked(True)
+        self.show_pose_text_check = QCheckBox("顯示 HUD 疊加 (姿態/計數)")
+        self.show_pose_text_check.setToolTip("在影像上顯示姿態文字與檢測數量。預設關閉，資訊將在右側狀態區顯示。")
+        self.show_pose_text_check.setChecked(False)
         layout.addWidget(self.show_pose_text_check)
 
         self.show_depth_check = QCheckBox("顯示深度圖")
@@ -392,6 +582,28 @@ class DetectionTab(QWidget):
         self.show_3d_vis_check.setToolTip("開啟 Open3D 3D 可視化視窗 (顯示點雲、PCA 平面、法向量)")
         self.show_3d_vis_check.stateChanged.connect(self._on_3d_vis_toggled)
         layout.addWidget(self.show_3d_vis_check)
+
+        group.setLayout(layout)
+        return group
+
+    def _create_results_group(self) -> QGroupBox:
+        """Create detection results table group."""
+        group = QGroupBox("檢測結果 (最新)")
+        layout = QVBoxLayout()
+
+        # Table
+        # Columns: ID, Confidence, PosX/PosY/PosZ in millimeters, Roll/Pitch/Yaw in radians
+        self.results_table = QTableWidget(0, 8)
+        self.results_table.setHorizontalHeaderLabels([
+            "ID", "Conf", "PosX (mm)", "PosY (mm)", "PosZ (mm)", "Roll (rad)", "Pitch (rad)", "Yaw (rad)"
+        ])
+        header = self.results_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.results_table.setSelectionBehavior(self.results_table.SelectionBehavior.SelectRows)
+        self.results_table.setSelectionMode(self.results_table.SelectionMode.SingleSelection)
+        layout.addWidget(self.results_table)
 
         group.setLayout(layout)
         return group
@@ -456,6 +668,8 @@ class DetectionTab(QWidget):
         self.status_label = QLabel("就緒")
         self.status_label.setStyleSheet("QLabel { color: green; }")
         layout.addWidget(self.status_label)
+
+        # Remove per-detection summary from status per request
 
         group.setLayout(layout)
         return group
@@ -522,42 +736,26 @@ class DetectionTab(QWidget):
         self.run_detection_btn.clicked.connect(self._on_detect)
         layout.addWidget(self.run_detection_btn)
 
-        # Optional: Stop button
-        self.stop_detection_btn = QPushButton("⏹ 停止")
-        self.stop_detection_btn.setMinimumHeight(35)
-        self.stop_detection_btn.setEnabled(False)
-        self.stop_detection_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4d4d4d;
-                color: #d4d4d4;
-                border: 1px solid #3e3e42;
-                border-radius: 4px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #5a5a5a;
-                border-color: #505050;
-            }
-            QPushButton:pressed {
-                background-color: #3e3e42;
-            }
-            QPushButton:disabled {
-                background-color: #3e3e42;
-                color: #808080;
-                border-color: #2d2d30;
-            }
-        """)
-        self.stop_detection_btn.clicked.connect(self._on_stop_detection)
-        layout.addWidget(self.stop_detection_btn)
+        # Single toggle button: text changes between Start/Stop
 
         container.setLayout(layout)
         return container
 
     def _on_stop_detection(self):
-        """Handle stop detection button click."""
-        if self.detection_worker and self.detection_worker.isRunning():
-            self.detection_worker.stop()
+        """Stop detection worker if running (used by toggle)."""
+        try:
+            if self.detection_worker:
+                self.detection_worker.stop()
+                self.detection_worker.wait(1500)
+                self.detection_worker = None
+            self.is_detecting = False
+            self.run_detection_btn.setEnabled(True)
+            self.run_detection_btn.setText("🚀 開始檢測")
+            self.fps_label.setText("FPS: --")
+            self.status_label.setText("檢測已停止")
             self.output_console.log_warning("Detection stopped by user.")
+        except Exception as e:
+            self.output_console.log_error(f"Error stopping detection: {e}")
 
     def _connect_signals(self):
         """Connect UI signals to slots."""
@@ -709,6 +907,9 @@ class DetectionTab(QWidget):
                 self.model_status_label.setText("模型: 未設定")
                 self.model_status_label.setStyleSheet("QLabel { font-size: 10px; color: orange; }")
 
+            # Sync intrinsics UI with current values
+            self._reset_intrinsics_ui_to_custom()
+
         except Exception as e:
             QMessageBox.critical(
                 self,
@@ -719,6 +920,45 @@ class DetectionTab(QWidget):
             self.status_label.setStyleSheet("QLabel { color: red; }")
             self.model_status_label.setText("模型: 載入失敗")
             self.model_status_label.setStyleSheet("QLabel { font-size: 10px; color: red; }")
+
+    def _update_intrinsics_status(self):
+        """Sync UI to custom intrinsics (no separate status label)."""
+        self._reset_intrinsics_ui_to_custom()
+
+    def _update_intrinsics_status_camera_mode(self):
+        """No-op status updater (UI already shows camera intrinsics when set)."""
+        return
+
+    def _update_intrinsics_ui_from_camera(self, intrinsics: Dict):
+        """Update intrinsics UI fields from camera factory calibration (read-only display)."""
+        # Block signals to prevent triggering save
+        self.intrinsics_width.blockSignals(True)
+        self.intrinsics_height.blockSignals(True)
+        self.intrinsics_fx.blockSignals(True)
+        self.intrinsics_fy.blockSignals(True)
+        self.intrinsics_cx.blockSignals(True)
+        self.intrinsics_cy.blockSignals(True)
+
+        self.intrinsics_width.setValue(intrinsics['width'])
+        self.intrinsics_height.setValue(intrinsics['height'])
+        self.intrinsics_fx.setValue(intrinsics['fx'])
+        self.intrinsics_fy.setValue(intrinsics['fy'])
+        self.intrinsics_cx.setValue(intrinsics['cx'])
+        self.intrinsics_cy.setValue(intrinsics['cy'])
+
+        # Unblock signals
+        self.intrinsics_width.blockSignals(False)
+        self.intrinsics_height.blockSignals(False)
+        self.intrinsics_fx.blockSignals(False)
+        self.intrinsics_fy.blockSignals(False)
+        self.intrinsics_cx.blockSignals(False)
+        self.intrinsics_cy.blockSignals(False)
+
+        # Status handled via UI values only
+
+    def _reset_intrinsics_ui_to_custom(self):
+        """Reset intrinsics UI to custom settings (after camera stop)."""
+        self._update_intrinsics_ui_from_camera(self.custom_intrinsics)
 
     @Slot()
     def _on_browse_image(self):
@@ -752,9 +992,28 @@ class DetectionTab(QWidget):
 
             self.status_label.setText("正在啟動相機...")
 
-            # Initialize camera service
+            # Initialize camera service if not exists
             if self.camera_adapter is None:
                 self.camera_adapter = RealSenseService()
+                # Start the camera now
+                self.camera_adapter.start()
+            elif not self.camera_adapter.is_started:
+                # Resume existing camera adapter if stopped
+                self.camera_adapter.start()
+
+            # Read and store factory calibration from RealSense
+            try:
+                rs_intrinsics = self.camera_adapter.get_camera_intrinsics()
+                self.camera_intrinsics = rs_intrinsics
+                self.output_console.log_result(
+                    f"廠牌校正內參已載入: {rs_intrinsics['width']}x{rs_intrinsics['height']}, "
+                    f"fx={rs_intrinsics['fx']:.2f}, fy={rs_intrinsics['fy']:.2f}"
+                )
+                # Update UI to show factory intrinsics (read-only view)
+                self._update_intrinsics_ui_from_camera(rs_intrinsics)
+            except Exception as e:
+                self.output_console.log_warning(f"無法讀取 RealSense 廠商內參: {e}")
+                self.camera_intrinsics = self.custom_intrinsics
 
             # Update UI
             self.is_camera_active = True
@@ -764,10 +1023,12 @@ class DetectionTab(QWidget):
             self.camera_mode_radio.setChecked(True)
 
             # Log successful connection
-            self.output_console.log_result("RealSense camera connected successfully.")
+            self.output_console.log_result("RealSense camera connected successfully. Ready to start detection.")
 
-            # Start detection worker in camera mode
-            self._start_camera_detection()
+            # Update intrinsics display for camera mode
+            self._update_intrinsics_status_camera_mode()
+
+            # Note: Detection must be started separately via the "開始檢測" button
 
         except Exception as e:
             # Log error
@@ -780,6 +1041,7 @@ class DetectionTab(QWidget):
             )
             self.status_label.setText(f"❌ 相機啟動失敗: {e}")
             self.status_label.setStyleSheet("QLabel { color: red; }")
+            self.is_camera_active = False
 
     @Slot()
     def _on_stop_camera(self):
@@ -788,25 +1050,28 @@ class DetectionTab(QWidget):
             # Log camera stop
             self.output_console.log_info("Stopping camera...")
 
-            # Stop worker
+            # Stop worker first
             if self.detection_worker:
                 self.detection_worker.stop()
                 self.detection_worker.wait()
                 self.detection_worker = None
 
-            # Stop camera
-            if self.camera_adapter:
-                if hasattr(self.camera_adapter, 'stop'):
-                    self.camera_adapter.stop()
+            # Stop camera safely
+            if self.camera_adapter and self.camera_adapter.is_started:
+                self.camera_adapter.stop()
 
             # Update UI
             self.is_camera_active = False
+            self.camera_intrinsics = None  # Clear factory calibration
             self.start_camera_btn.setEnabled(True)
             self.stop_camera_btn.setEnabled(False)
             self.browse_btn.setEnabled(True)
 
             self.status_label.setText("相機已停止")
             self.fps_label.setText("FPS: --")
+
+            # Reset intrinsics UI and display to custom settings
+            self._reset_intrinsics_ui_to_custom()
 
             # Log successful stop
             self.output_console.log_result("Camera stopped.")
@@ -820,15 +1085,116 @@ class DetectionTab(QWidget):
                 "停止相機",
                 f"停止相機時發生錯誤:\n{e}"
             )
+            # Ensure UI is updated even if stop failed
+            self.is_camera_active = False
+            self.start_camera_btn.setEnabled(True)
+            self.stop_camera_btn.setEnabled(False)
+
+    def shutdown(self):
+        """Gracefully stop detection worker and camera before closing tab."""
+        try:
+            # Stop detection worker
+            if self.detection_worker:
+                try:
+                    self.detection_worker.stop()
+                    # give it a short time to finish
+                    self.detection_worker.wait(1500)
+                except Exception:
+                    pass
+                finally:
+                    self.detection_worker = None
+
+            # Stop camera if active
+            if self.camera_adapter:
+                try:
+                    if hasattr(self.camera_adapter, 'is_started'):
+                        if self.camera_adapter.is_started and hasattr(self.camera_adapter, 'stop'):
+                            self.camera_adapter.stop()
+                    elif hasattr(self.camera_adapter, 'stop'):
+                        self.camera_adapter.stop()
+                except Exception:
+                    pass
+
+            self.is_camera_active = False
+        except Exception:
+            # Swallow all exceptions during shutdown to ensure smooth exit
+            pass
+
+    @Slot(int)
+    def _on_confidence_changed(self, value: int):
+        """Handle confidence threshold slider change.
+
+        Args:
+            value: Slider value (0-100)
+        """
+        self.confidence_threshold = value / 100.0
+        self.confidence_label.setText(f"{self.confidence_threshold:.2f}")
+
+    @Slot(int)
+    def _on_iou_changed(self, value: int):
+        """Handle IOU threshold slider change.
+
+        Args:
+            value: Slider value (0-100)
+        """
+        self.iou_threshold = value / 100.0
+        self.iou_label.setText(f"{self.iou_threshold:.2f}")
+
+    @Slot()
+    def _on_intrinsics_changed(self):
+        """Handle camera intrinsics inline edit change."""
+        # Update custom_intrinsics from UI fields
+        self.custom_intrinsics = {
+            'width': self.intrinsics_width.value(),
+            'height': self.intrinsics_height.value(),
+            'fx': self.intrinsics_fx.value(),
+            'fy': self.intrinsics_fy.value(),
+            'cx': self.intrinsics_cx.value(),
+            'cy': self.intrinsics_cy.value()
+        }
+
+    @Slot()
+    def _on_intrinsics_apply_clicked(self):
+        """Confirm and apply intrinsics edits (saves to config)."""
+        reply = QMessageBox.question(
+            self,
+            "套用內參",
+            "確定要套用目前的內參設定並儲存嗎？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._save_intrinsics_to_config(self.custom_intrinsics)
+            QMessageBox.information(self, "內參已更新", "已套用並儲存內參設定。")
 
     @Slot()
     def _on_detect(self):
-        """Handle detect button click."""
+        """Handle detect button click (single toggle Start/Stop)."""
+        # If currently detecting, stop worker
+        if self.is_detecting:
+            try:
+                if self.detection_worker:
+                    self.output_console.log_info("Stopping detection...")
+                    self.detection_worker.stop()
+                    self.detection_worker.wait(1500)
+                    self.detection_worker = None
+                self.is_detecting = False
+                self.run_detection_btn.setText("🚀 開始檢測")
+                self.status_label.setText("檢測已停止")
+                self.fps_label.setText("FPS: --")
+            except Exception as e:
+                self.output_console.log_error(f"Error stopping detection: {e}")
+            return
+
+        # Not detecting: start detection based on mode
         if self.camera_mode_radio.isChecked():
-            # Camera mode - start continuous detection
             self.output_console.log_info("Starting camera detection...")
             if not self.is_camera_active:
-                self._on_start_camera()
+                error_msg = "請先啟動相機 (按下 '啟動相機')"
+                self.output_console.log_error(error_msg)
+                QMessageBox.warning(self, "相機未啟動", error_msg)
+                return
+            self._start_camera_detection()
         else:
             # Image mode - single detection
             if not self.current_image_path:
@@ -924,73 +1290,6 @@ class DetectionTab(QWidget):
             self.model_status_label.setText("模型: 載入失敗")
             self.model_status_label.setStyleSheet("QLabel { font-size: 10px; color: red; }")
 
-    def _on_intrinsics_settings(self):
-        """Open intrinsics settings dialog."""
-        from .intrinsics_dialog import IntrinsicsDialog
-
-        # Pass RealSense service if available (camera mode)
-        realsense = None
-        if self.camera_mode_radio.isChecked() and hasattr(self, 'realsense_service'):
-            realsense = self.realsense_service
-
-        dialog = IntrinsicsDialog(
-            parent=self,
-            initial_intrinsics=self.custom_intrinsics,
-            realsense_service=realsense
-        )
-
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.custom_intrinsics = dialog.get_intrinsics()
-            self._save_intrinsics_to_config(self.custom_intrinsics)
-
-            # Update status label
-            self.intrinsics_status_label.setText(
-                f"內參: {self.custom_intrinsics['width']}x{self.custom_intrinsics['height']}, "
-                f"fx={self.custom_intrinsics['fx']:.1f}"
-            )
-
-            QMessageBox.information(
-                self,
-                "設定已儲存",
-                "相機內部參數已更新並儲存"
-            )
-
-    @Slot(int)
-    def _on_3d_vis_toggled(self, state: int):
-        """Handle 3D visualization toggle.
-
-        Args:
-            state: Checkbox state (0=unchecked, 2=checked)
-        """
-        if state == Qt.CheckState.Checked.value:
-            # Initialize 3D visualizer on demand
-            if self.visualizer_3d is None:
-                try:
-                    from .visualizer_3d_widget import Visualizer3DWidget
-                    self.visualizer_3d = Visualizer3DWidget(
-                        window_name="3D Pose Visualization",
-                        width=1280,
-                        height=720
-                    )
-                    self.status_label.setText("✅ 3D 可視化已啟動")
-                except Exception as e:
-                    QMessageBox.warning(
-                        self,
-                        "3D 可視化啟動失敗",
-                        f"無法啟動 Open3D 可視化:\n{e}\n\n"
-                        "請確認已安裝 open3d 套件"
-                    )
-                    self.show_3d_vis_check.setChecked(False)
-                    self.status_label.setText(f"❌ 3D 可視化失敗: {e}")
-        else:
-            # Close 3D visualizer
-            if self.visualizer_3d:
-                try:
-                    self.visualizer_3d.close()
-                    self.visualizer_3d = None
-                    self.status_label.setText("3D 可視化已關閉")
-                except Exception as e:
-                    print(f"Warning: Error closing 3D visualizer: {e}")
 
     def _auto_save_json(self, result: Dict):
         """Auto-save detection results as JSON to output directory.
@@ -1195,7 +1494,10 @@ class DetectionTab(QWidget):
     def _detect_static_image(self):
         """Run detection on current static image."""
         try:
-            self.run_detection_btn.setEnabled(False)
+            # Toggle to detecting state
+            self.is_detecting = True
+            self.run_detection_btn.setEnabled(True)
+            self.run_detection_btn.setText("⏹ 停止")
             self.status_label.setText("正在檢測...")
 
             # Start worker
@@ -1203,7 +1505,11 @@ class DetectionTab(QWidget):
                 detection_service=self.detection_service,
                 mode='image',
                 image_path=self.current_image_path,
-                custom_intrinsics=self.custom_intrinsics
+                custom_intrinsics=self.custom_intrinsics,
+                show_obb=True,
+                show_axes=False,
+                show_pose_text=False,
+                show_detection_count=False
             )
 
             # Connect signals
@@ -1216,7 +1522,9 @@ class DetectionTab(QWidget):
             self.detection_worker.start()
 
         except Exception as e:
+            self.is_detecting = False
             self.run_detection_btn.setEnabled(True)
+            self.run_detection_btn.setText("🚀 開始檢測")
             QMessageBox.critical(
                 self,
                 "檢測失敗",
@@ -1226,12 +1534,20 @@ class DetectionTab(QWidget):
     def _start_camera_detection(self):
         """Start camera detection worker."""
         try:
+            # Use factory calibration if available, otherwise fall back to custom
+            intrinsics_to_use = self.camera_intrinsics if self.camera_intrinsics else self.custom_intrinsics
+
             # Start worker
             self.detection_worker = DetectionWorker(
                 detection_service=self.detection_service,
                 mode='camera',
                 camera_adapter=self.camera_adapter,
-                target_fps=30.0
+                target_fps=30.0,
+                custom_intrinsics=intrinsics_to_use,
+                show_obb=True,
+                show_axes=False,
+                show_pose_text=False,
+                show_detection_count=False
             )
 
             # Connect signals
@@ -1242,6 +1558,11 @@ class DetectionTab(QWidget):
 
             # Start worker
             self.detection_worker.start()
+
+            # Toggle to detecting state
+            self.is_detecting = True
+            self.run_detection_btn.setEnabled(True)
+            self.run_detection_btn.setText("⏹ 停止")
 
         except Exception as e:
             self._on_stop_camera()
@@ -1270,6 +1591,9 @@ class DetectionTab(QWidget):
         count = result['metadata']['detection_count']
         self.count_label.setText(f"檢測數: {count}")
 
+        # Update table with latest results
+        self._populate_results_table(result)
+
         # Log detection completion
         self.output_console.log_result(f"Detection completed. Found {count} object(s).")
 
@@ -1292,9 +1616,11 @@ class DetectionTab(QWidget):
         if self.auto_save_json_checkbox.isChecked() and has_detections:
             self._auto_save_json(result)
 
-        # Re-enable detect button for image mode
-        if not self.is_camera_active:
+        # If image mode completes, reset Start/Stop toggle
+        if result['metadata'].get('source_type') == 'image' or not self.is_camera_active:
+            self.is_detecting = False
             self.run_detection_btn.setEnabled(True)
+            self.run_detection_btn.setText("🚀 開始檢測")
 
     @Slot(float, float)
     def _on_performance_updated(self, fps: float, processing_time_ms: float):
@@ -1317,7 +1643,9 @@ class DetectionTab(QWidget):
         """
         self.status_label.setText(f"❌ 檢測失敗: {error_msg}")
         self.status_label.setStyleSheet("QLabel { color: red; }")
+        self.is_detecting = False
         self.run_detection_btn.setEnabled(True)
+        self.run_detection_btn.setText("🚀 開始檢測")
 
         # Log error to console
         self.output_console.log_error(f"Detection failed: {error_msg}")
@@ -1328,6 +1656,52 @@ class DetectionTab(QWidget):
             f"檢測過程發生錯誤:\n{error_msg}"
         )
 
+    def _populate_results_table(self, result: Dict):
+        """Populate the results table with the latest detections."""
+        try:
+            detections = result.get('detections', [])
+            self.results_table.setRowCount(len(detections))
+
+            for row, det in enumerate(detections):
+                pose = det.get('pose', {})
+                pos = pose.get('position', {})
+                rot = pose.get('rotation_euler', {})
+
+                det_id = str(det.get('detection_id', ''))
+                conf = det.get('confidence', 0.0)
+
+                # Positions are provided in meters; display as meters
+                pos_x = pos.get('x', 0.0)
+                pos_y = pos.get('y', 0.0)
+                pos_z = pos.get('z', 0.0)
+
+                # Rotation angles (already corrected in Simple mode by detection service)
+                roll = rot.get('roll_rad', 0.0)
+                pitch = rot.get('pitch_rad', 0.0)
+                yaw = rot.get('yaw_rad', 0.0)
+
+                values = [
+                    det_id,
+                    f"{conf:.2f}",
+                    f"{pos_x:.3f}",
+                    f"{pos_y:.3f}",
+                    f"{pos_z:.3f}",
+                    f"{roll:.3f}",
+                    f"{pitch:.3f}",
+                    f"{yaw:.3f}",
+                ]
+
+                for col, text in enumerate(values):
+                    item = QTableWidgetItem(text)
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                    self.results_table.setItem(row, col, item)
+
+            # If no detections, clear table
+            if len(detections) == 0:
+                self.results_table.setRowCount(0)
+        except Exception as e:
+            self.output_console.log_warning(f"無法更新結果表格: {e}")
+
     @Slot(str)
     def _on_status_message(self, message: str):
         """Handle status message.
@@ -1336,6 +1710,38 @@ class DetectionTab(QWidget):
             message: Status message
         """
         self.status_label.setText(message)
+
+    def _update_last_detection_summary(self, result: Dict):
+        """Render a compact summary of the last detection in the status panel."""
+        try:
+            count = result.get('metadata', {}).get('detection_count', 0)
+            if count == 0:
+                self.last_detection_label.setText("尚無檢測結果")
+                return
+
+            lines = [f"檢測數: {count}"]
+
+            detections = result.get('detections', [])
+            for det in detections[:3]:
+                pos = det.get('pose', {}).get('position', {})
+                rot = det.get('pose', {}).get('rotation_euler', {})
+                conf = det.get('confidence', 0.0)
+                det_id = det.get('detection_id', '-')
+                pos_x = pos.get('x', 0.0)
+                pos_y = pos.get('y', 0.0)
+                pos_z = pos.get('z', 0.0)
+                yaw = rot.get('yaw_rad', 0.0)
+                lines.append(
+                    f"ID {det_id} | conf {conf:.2f} | pos=({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f}) | yaw={yaw:.2f}"
+                )
+
+            if count > 3:
+                lines.append(f"... 另 {count - 3} 筆")
+
+            self.last_detection_label.setText("\n".join(lines))
+        except Exception:
+            # Avoid breaking UI on formatting errors
+            self.last_detection_label.setText("⚠️ 無法顯示摘要")
 
     def _format_txt_output(self, result: Dict) -> list:
         """Format detection result as TXT lines.

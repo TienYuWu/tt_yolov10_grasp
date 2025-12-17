@@ -65,6 +65,19 @@ class MainWindow(QMainWindow):
         # Align UI text to left for better readability
         self._align_ui_text_left()
 
+    def closeEvent(self, event):
+        """Ensure all background workers and devices are stopped before exit."""
+        try:
+            if hasattr(self, 'detection_tab') and self.detection_tab:
+                # Graceful shutdown of detection tab (worker + camera)
+                if hasattr(self.detection_tab, 'shutdown'):
+                    self.detection_tab.shutdown()
+        except Exception:
+            # Avoid blocking close on cleanup errors
+            pass
+        finally:
+            super().closeEvent(event)
+
     def _load_model_path(self, config: AppConfig) -> str:
         """Load model path from config file or use default.
 
