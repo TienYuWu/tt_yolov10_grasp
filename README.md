@@ -24,17 +24,26 @@ pip install torch==2.8.0+cu128 torchvision==0.23.0+cu128 --index-url https://dow
 pip install pyrealsense2
 ```
 
+**SAM 權重取得**
+
+首次執行程式會自動下載 SAM 權重（需連線，約 375 MB）。如需手動取得，請參閱 [USER_GUIDE.md](./USER_GUIDE.md#sam-權重下載)。
+
 **啟動範例**
 
 ```powershell
+# CPU（自動下載 SAM）
 python app.py --image-dir "C:\data\images" --output-dir "C:\data\out" --device cpu
+
+# GPU + 手動指定權重
+python app.py --image-dir "C:\data\images" --output-dir "C:\data\out" --checkpoint "models\sam_vit_b_01ec64.pth" --device cuda
+
+# 指定較大的 SAM 模型（高精度）
+python app.py --model-type vit_l --checkpoint "models\sam_vit_l.pth" --device cuda
 ```
+
+常用參數：`--image-dir` `--output-dir` `--checkpoint` `--model-type`（vit_b/vit_l/vit_h） `--device`（cpu/cuda） `--iou-threshold`
 
 **典型流程**
 - 標註：載入圖片 → 執行 SAM → 匯出 OBB
 - 訓練：設定資料集分割與參數 → 開始訓練
 - 檢測：設定模型路徑與姿態模式 → 🚀 開始檢測 → 匯出 JSON
-
-
-
-

@@ -1,7 +1,7 @@
 # 使用者手冊
 
-**版本**: 2.1
-**更新日期**: 2025-12-17
+**版本**: 2.2
+**更新日期**: 2026-04-12
 
 
 ---
@@ -94,6 +94,48 @@ pip install pyrealsense2
 ```
 
 
+
+### SAM 權重下載
+
+首次使用需要 SAM 模型權重檔案（約 375 MB）。有兩種方式取得：
+
+**方法一：自動下載（建議）**
+
+啟動時不傳入 `--checkpoint`，程式會自動從網路下載並快取：
+
+```powershell
+python app.py --image-dir "C:\path\to\images" --output-dir "C:\path\to\out" --device cpu
+```
+
+> ⚠️ 第一次執行需要網路連線，下載時間依網速而定。下載完成後會快取到本機，之後不需重複下載。
+
+**方法二：手動下載**
+
+1. 前往 [segment-anything Model Checkpoints](https://github.com/facebookresearch/segment-anything#model-checkpoints)
+2. 下載 `sam_vit_b_01ec64.pth`（最輕量，適合一般使用）
+3. 將檔案放到專案目錄的 `models/` 資料夾：
+   ```
+   tt_yolov10_grasp/
+   └── models/
+       └── sam_vit_b_01ec64.pth
+   ```
+4. 啟動時指定路徑：
+   ```powershell
+   python app.py --checkpoint "models\sam_vit_b_01ec64.pth" --device cpu
+   ```
+
+**SAM 模型類型說明**
+
+| 模型類型 | 參數量 | 速度 | 精度 | 推薦情境 |
+|---------|--------|------|------|---------|
+| `vit_b`（預設）| 375 MB | 快 | 一般 | 日常使用、CPU 環境 |
+| `vit_l` | 1.25 GB | 中 | 較高 | 有 GPU 時 |
+| `vit_h` | 2.56 GB | 慢 | 最高 | 高精度需求 |
+
+指定模型類型：
+```powershell
+python app.py --model-type vit_b --checkpoint "models\sam_vit_b_01ec64.pth" --device cuda
+```
 
 ### 啟動應用程式
 
@@ -352,5 +394,120 @@ Simple 與 Full 差異：
 
 ---
 
+## 常見問題
 
+### SAM 相關
+
+**Q: 啟動時顯示「無法載入 SAM 模型」**
+
+- 確認網路連線（自動下載模式）
+- 或確認 `--checkpoint` 路徑正確且檔案存在
+- 可執行快速檢查：`Test-Path "models\sam_vit_b_01ec64.pth"`
+
+**Q: SAM 執行很慢**
+
+- 確認是否在 GPU 環境下執行：`--device cuda`
+- 使用 ROI 功能縮小處理範圍（只框選物體所在區域）
+- 改用較小的模型：`--model-type vit_b`
+
+### GPU / CUDA 相關
+
+**Q: `torch.cuda.is_available()` 回傳 `False`**
+
+1. 確認已安裝 GPU 版 PyTorch：`pip install torch==2.8.0+cu128 --index-url https://download.pytorch.org/whl/cu128`
+2. 確認 NVIDIA 驅動已正確安裝（支援 CUDA 12.8）
+3. 重新啟動 PowerShell 後再測試
+
+**Q: 安裝 torch cu128 wheel 時失敗**
+
+- 改用以下指令明確指定版本：
+  ```powershell
+  pip install torch==2.8.0+cu128 torchvision==0.23.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+  ```
+- 如在公司網路環境，可能需要設定代理或將 wheel 下載到本機再離線安裝
+
+### RealSense 相關
+
+**Q: 點「啟動相機」沒有回應或顯示錯誤**
+
+- 確認 RealSense 相機已透過 USB 3.0 連接
+- 確認已安裝 `pyrealsense2`：`pip install pyrealsense2`
+- 確認 RealSense SDK 2.0 已安裝（[官網下載](https://www.intelrealsense.com/sdk-2/)）
+- 嘗試以系統管理員身份執行 PowerShell
+
+### 訓練相關
+
+**Q: 訓練時顯示 CUDA out of memory**
+
+- 降低 Batch Size（例如從 16 降到 4 或 8）
+- 確認沒有其他程式佔用 GPU 記憶體
+
+**Q: 找不到 `dataset.yaml`**
+
+- 確認已點擊「配置訓練/驗證集分割」並按確定生成設定檔
+- 確認選擇的資料夾內包含 `labels/` 和 `images/` 子目錄
+
+### 問題回報
+
+回報問題時請附上：
+- 作業系統版本與 Python 版本
+- 是否使用 GPU（顯示卡型號、CUDA 版本與 NVIDIA 驅動版本）
+- 完整終端錯誤訊息（stderr）
+- `requirements.txt` 或 `conda list` 輸出
+
+---
+
+## 進階功能
+
+### 自訂資料強化參數
+
+訓練頁籤的「⚙️ 資料強化設定」支援儲存自訂預設組合，方便在不同實驗間快速切換。
+
+**建議策略**：
+- 首次訓練用「中度強化」，以 mAP 為基準
+- 若資料不足（< 100 張），改用「重度強化」
+- 若物體外觀固定、背景單純，改用「輕度強化」
+
+### 多模型管理
+
+檢測頁籤支援動態切換模型，無需重啟程式：
+
+1. 點擊「模型路徑設定」選擇新的 `.pt` 檔
+2. 系統自動載入並記憶路徑，下次啟動自動使用
+
+**使用情境**：對同一張圖片用不同訓練輪數的模型（如第 50 輪 vs 第 200 輪）做比較，評估模型收斂情況。
+
+### 機器手臂整合
+
+檢測結果的 JSON 格式設計為直接供機器手臂使用：
+
+```json
+{
+  "objects": [
+    {
+      "transform_matrix": [[...], [...], [...], [...]],
+      "position": {"x": 0.123, "y": -0.045, "z": 0.612},
+      "rotation_euler": {"roll_rad": 0.0, "pitch_rad": 0.0, "yaw_rad": 1.57},
+      "obb": {"cx": 320, "cy": 240, "w": 80, "h": 40, "angle_deg": 45.0}
+    }
+  ]
+}
+```
+
+- **Simple 模式**：`roll_rad=0, pitch_rad=0`，只有 `yaw_rad`，適合平放物體
+- **Full 模式**：提供完整 `roll/pitch/yaw` 與 `surface_normal`，適合任意姿態物體
+
+建議機器手臂控制器讀取 `transform_matrix`（4×4 齊次變換矩陣）直接套用，相較歐拉角不會有 gimbal lock 問題。
+
+### 相機內參設定
+
+若使用非 RealSense 相機（如一般 USB 相機），需要手動設定內參：
+
+1. 在檢測頁籤點「相機內參設定」→「修改內參」
+2. 輸入以下數值（以 OpenCV `calibrateCamera` 標定結果為準）：
+   - `fx`, `fy`：焦距（像素）
+   - `cx`, `cy`：主點座標（通常接近影像中心）
+3. 點確定後自動儲存，下次啟動自動載入
+
+---
 

@@ -1,4 +1,4 @@
-# GPU 安裝說明（CUDA 12.8 / PyTorch +cu128）
+﻿# GPU 安裝說明（CUDA 12.8 / PyTorch +cu128）
 
 此說明針對想在 Windows / Linux 上啟用 GPU 的使用者，重點列出安裝步驟與常見錯誤處理。
 
@@ -27,7 +27,7 @@ conda activate tt_yolov10_pilegrasp
 pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.8.0+cu128 torchvision==0.23.0+cu128
 ```
 
-1. 安裝 `requirements.txt` 中其他套件：
+4. 安裝 `requirements.txt` 中其他套件：
 
 ```powershell
 pip install -r requirements.txt
